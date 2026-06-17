@@ -1,0 +1,344 @@
+---
+title: "Fig4"
+output: html_document
+date: "2026-06-11"
+---
+---
+title: "Figure 3 plots"
+output: github_document
+date: "2026-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(Seurat)
+library(tidyr)
+library(dplyr)
+library(Matrix)
+library(stringr)
+library(ggrepel)
+library(readr)
+library(cowplot)
+library(ggplot2)
+library(tibble)
+
+
+options(future.globals.maxSize = 10 * 1024^3)
+```
+
+
+
+The first steps for this part are to model. In the section below is the code used to produce the OLS, the Lasso and the Ridge model used and tested in the paper. Note that producing the correlations for pRPS6 and each RNA takes some time to run. 
+
+
+```{r Modeling}
+
+#### OLS model using Glossary Data and Applying to "Test" dataset
+### First load in "Glossary", "Test" and "GWPS_mTOR" datasets
+rna.mtx <- GetAssayData(Glossary,assay = "RNA",layer = "data")
+adt.mtx <- GetAssayData(Glossary,assay = "ADT",layer = "data")
+
+rna.correlations <- list()
+
+adt_list <- "pRPS6"
+for (adt in adt_list) {
+  c <- list()
+  print(paste("On ADT:", adt))
+  for (gene in rownames(rna.mtx)) {
+    r <- cor(x = adt.mtx[adt,], y = rna.mtx[gene,], method = "pearson")
+    c[[gene]] <- r
+  }
+  rna.correlations[[adt]] <- c
+}
+
+# --- 2. Rank genes by pRPS6 correlation, select top/bottom ---
+pRPS6_cors <- sort(
+  unlist(rna.correlations$pRPS6),
+  decreasing = TRUE,
+  na.last = NA       # drops NAs automatically
+)
+
+n_genes    <- length(pRPS6_cors)
+pRPS6_top  <- names(pRPS6_cors)[1:1000]
+pRPS6_bot  <- names(pRPS6_cors)[(n_genes - 999):n_genes]  # bottom 1000
+pRPS6_pred <- c(pRPS6_top, pRPS6_bot)
+
+# --- 3. Filter to genes present in GWPS ---
+GWPS_genes  <- rownames(GetAssayData(GWPS_mTOR@assays$RNA))
+overlap     <- intersect(pRPS6_pred, GWPS_genes)
+
+# --- 4. Build training data (Glossary) and fit OLS model ---
+rna_glossary   <- as.data.frame(t(GetAssayData(Glossary, layer = "data", assay = "RNA")[overlap, ]))
+adt_glossary   <- as.data.frame(t(GetAssayData(Glossary, layer = "data", assay = "ADT")))
+rna_glossary$pRPS6 <- adt_glossary$pRPS6
+
+model <- lm(pRPS6 ~ ., data = rna_glossary)
+
+# --- 5. Predict on Test object ---
+rna_test       <- as.data.frame(t(GetAssayData(Test, layer = "data", assay = "RNA")[overlap, ]))
+Test$pRPS6_OLS <- predict(model, newdata = rna_test)
+
+#### LASSO model using Glossary Data and Applying to "Test" dataset
+### First load in "Glossary", "Test" and "GWPS_mTOR" datasets
+library(glmnet)
+GWPS_counts <- GetAssayData(GWPS_mTOR@assays$RNA)
+GWPS_genes <- rownames(GWPS_counts)
+
+#########
+# Helper to extract and transpose assay data
+get_assay_matrix <- function(obj, assay, layer = "data") {
+  as.data.frame(t(as.data.frame(GetAssayData(obj, layer = layer, assay = assay))))
+}
+
+# RNA counts
+counts_data <- get_assay_matrix(Glossary, "RNA")
+counts_test  <- get_assay_matrix(Test, "RNA")
+
+# Filter to valid genes shared across both objects and GWPS_genes
+valid_genes  <- Reduce(intersect, list(GWPS_genes, colnames(counts_data), colnames(counts_test)))
+counts_data  <- as.matrix(counts_data[, valid_genes, drop = FALSE])
+
+# ADT data
+adt_data     <- get_assay_matrix(Glossary, "ADT")
+resp_pRPS6   <- adt_data$pRPS6
+
+cv_lasso <- cv.glmnet(
+  counts_data, resp_pRPS6, 
+  alpha = 1,               # alpha = 1 for LASSO
+  family = "gaussian",     # Use "gaussian" for linear regression
+  type.measure = "class",  # Measure for classification error
+  nfolds = 10              # Number of cross-flex4 folds
+)
+
+# Lambda with the minimum cross-flex4 error
+best_lambda <- cv_lasso$lambda.min
+
+final_model_LASSO <- glmnet(
+  counts_data, resp_pRPS6, 
+  alpha = 1, 
+  family = "gaussian", 
+  lambda = best_lambda
+)
+
+############### Applying Model
+counts_test  <- as.matrix(counts_test[, valid_genes, drop = FALSE])
+predicted <- predict(final_model_LASSO, counts_test, type = "response")
+Test$pRPS6_LASSO <- predicted 
+
+#### Applying Ridge model, using the same valid genes as above
+
+cv_ridge <- cv.glmnet(
+  counts_data, resp_pRPS6, 
+  alpha = 0,               # alpha = 0 for Ridge
+  family = "gaussian",     # Use "gaussian" for linear regression
+  type.measure = "class",  # Measure for classification error
+  nfolds = 10              # Number of cross-flex4 folds
+)
+
+# Lambda with the minimum cross-flex4 error
+best_lambda <- cv_ridge$lambda.min
+
+final_model_ridge <- glmnet(
+  counts_data, resp_pRPS6, 
+  alpha = 0, 
+  family = "gaussian", 
+  lambda = best_lambda
+)
+
+############### Applying Model
+predicted_probs_ridge <- predict(final_model_ridge, counts_test, type = "response")
+Test$pRPS6_Ridge <- predicted_probs_ridge 
+```
+
+```{r Fig4A, dpi=300, fig.width=10, fig.height=5, dev='png'}
+df <- as.data.frame(FetchData(Test, vars = c("pRPS6_Ridge","pRPS6_LASSO","pRPS6_OLS","pRPS6_measured")))
+# Create the scatter plot with density-based color
+p1 <- ggplot(df, aes(x = pRPS6_measured, y = pRPS6_OLS)) +
+  stat_binhex(bins = 100) +  # Use hexbin for density-based coloring
+  scale_fill_viridis_c(option = "plasma") +  # Use the 'plasma' viridis palette
+  theme_minimal()+ 
+  ylim(0,6) +
+  xlim(0,6) +
+  geom_smooth(method = "lm", color = "black", se = TRUE) +
+  theme(panel.grid = element_blank()) +
+  labs(x = "adt_pRPS6",
+       y = "pRPS6_ridge")
+
+model <- lm(df$pRPS6_measured ~ df$pRPS6_OLS, data = df)
+summary(model)
+
+p2 <- ggplot(df, aes(x = pRPS6_measured, y = pRPS6_Ridge)) +
+  stat_binhex(bins = 100) +  # Use hexbin for density-based coloring
+  scale_fill_viridis_c(option = "plasma") +  # Use the 'plasma' viridis palette
+  theme_minimal() +
+  ylim(0,6) +
+  xlim(0,6) +
+  geom_smooth(method = "lm", color = "black", se = TRUE) +
+  theme(panel.grid = element_blank()) +
+  labs(x = "adt_pRPS6",
+       y = "pRPS6_lasso")
+
+model <- lm(df$pRPS6_measured ~ df$pRPS6_Ridge, data = df)
+summary(model)
+
+plot(p1+p2)
+```
+
+```{r Fig4B, dpi=300, fig.width=10, fig.height=5, dev='png'}
+#not wuite right
+
+
+ridge_coef <- coef(final_model_ridge)
+ridge_coef_df <- data.frame(
+  feature = rownames(ridge_coef),
+  coefficient = as.numeric(ridge_coef)
+)
+
+gloss_nt<- subset(Glossary,idents = "NO-TARGET")
+counts_data <- get_assay_matrix(gloss_nt, "RNA")
+avg_log_count <- colMeans(counts_data)
+avg_log_counts_df <- data.frame(
+  gene = names(avg_log_counts),
+  avg_log_count = as.numeric(avg_log_counts)
+)
+
+gene_weighted_scores <- avg_log_counts_df %>%
+  inner_join(
+    ridge_coef_df,
+    by = c("gene" = "feature")
+  ) %>%
+  mutate(weighted_score = avg_log_count * coefficient)
+
+gene_weighted_scores <- gene_weighted_scores %>%
+  mutate(rank = rank(-weighted_score, ties.method = "min"))
+
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+plot_df <- gene_weighted_scores %>%
+  arrange(desc(weighted_score)) %>%
+  mutate(rank = row_number())
+
+labels_to_show <- plot_df %>%
+  slice_head(n = 15) %>%
+  bind_rows(plot_df %>% slice_tail(n = 15)) %>%
+  pull(gene)
+
+p <- ggplot(plot_df, aes(x = rank, y = weighted_score)) +
+  geom_point(color = "black", size = 1.5, alpha = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  geom_text_repel(
+    aes(label = ifelse(gene %in% labels_to_show, gene, NA)),
+    color = "red",
+    size = 4,
+    max.overlaps = Inf,
+    box.padding = 0.4,
+    point.padding = 0.3,
+    segment.color = "red"
+  ) +
+  labs(
+    x = "Rank of Gene (by Model Contribution Score)",
+    y = "Model Contribution Score"
+  ) +
+  theme_minimal(base_size = 16)
+
+p
+```
+
+```{r Fig4C, dpi=300, fig.width=10, fig.height=5, dev='png'}
+cluster profiler plot for bottom 100 genes using model cntribution score
+
+library(clusterProfiler)
+library(enrichplot)
+library(ggplot2)
+library(org.Hs.eg.db)
+library(dplyr)
+
+bottom_100 <- gene_weighted_scores %>%
+  arrange(weighted_score) %>%
+  slice_head(n = 100)
+
+ego <- enrichGO(
+  gene          = bottom_100$gene,
+  OrgDb         = org.Hs.eg.db,
+  keyType       = "SYMBOL",
+  ont           = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.05,
+  qvalueCutoff  = 0.2,
+  readable      = TRUE
+)
+
+dotplot(ego, showCategory = 10)
+```
+
+```{r Fig4D, dpi=300, fig.width=10, fig.height=5, dev='png'}
+
+
+
+
+
+df <- as.data.frame(FetchData(Test, vars = c("pRPS6_measured", "pRPS6_ridge_10","pRPS6_ridge_30","pRPS6_ridge_50","pRPS6_ridge_100","pRPS6_ridge_500","pRPS6_ridge_1000","pRPS6_ridge_2000","pRPS6_Ridge")))
+model <- lm(df$pRPS6_measured ~ df$pRPS6_ridge_10, data = df)
+summary(model)
+model <- lm(df$pRPS6_measured ~ df$pRPS6_ridge_30, data = df)
+summary(model)
+model <- lm(df$pRPS6_measured ~ df$pRPS6_ridge_50, data = df)
+summary(model)
+model <- lm(df$pRPS6_measured ~ df$pRPS6_ridge_100, data = df)
+summary(model)
+model <- lm(df$pRPS6_measured ~ df$pRPS6_ridge_500, data = df)
+summary(model)
+model <- lm(df$pRPS6_measured ~ df$pRPS6_ridge_1000, data = df)
+summary(model)
+model <- lm(df$pRPS6_measured ~ df$pRPS6_ridge_2000, data = df)
+summary(model)
+model <- lm(df$pRPS6_measured ~ df$pRPS6_Ridge, data = df)
+summary(model)
+
+# Example dataframe structure
+df <- data.frame(
+  top_n = factor(c(10, 30, 50, 100, 500, 1000, 2000, "All"), 
+                 levels = c(10, 30, 50, 100, 500, 1000, 2000, "All")),
+  correlation = c(0.65, 0.705, 0.711, 0.718,0.742, 0.750, 0.752, 0.786)
+)
+
+p1 <- ggplot(df, aes(x = top_n, y = correlation, group = 1)) +
+  geom_line() +
+  geom_point(size = 3) +
+  labs(
+    x = "Top/Bottom Genes in Model",
+    y = "Correlation"
+  ) +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(color = "black")
+  )
+
+p1
+```
+
+
+```{r Fig4E, dpi=300, fig.width=10, fig.height=5, dev='png'}
+p1 <- RidgePlot(GWPS_mTOR,"pRPS6_linear",idents = c("RPTOR","non-targeting","TSC1")) + xlim(1.5,6) + NoLegend() + theme(axis.title.y = element_blank(),axis.text.y = element_blank())
+
+p2 <- RidgePlot(GWPS_mTOR,"pRPS6_ridge",idents = c("RPTOR","non-targeting","TSC1")) + xlim(1.5,6) + NoLegend() + theme(axis.title.y = element_blank(),axis.text.y = element_blank())
+
+GWPS_mTOR_meta <- GWPS_mTOR@meta.data
+GWPS_mTOR_meta_RT <- GWPS_mTOR_meta[GWPS_mTOR_meta$gene == c("RPTOR","TSC1"), ]
+GWPS_mTOR_meta_NT <- GWPS_mTOR_meta[GWPS_mTOR_meta$gene == c("non-targeting","TSC1"), ]
+GWPS_mTOR_meta_RN <- GWPS_mTOR_meta[GWPS_mTOR_meta$gene == c("RPTOR","non-targeting"), ]
+
+
+t.test(pRPS6_linear ~ gene, data = GWPS_mTOR_meta_RT)
+t.test(pRPS6_ridge ~ gene, data = GWPS_mTOR_meta_RT)
+t.test(pRPS6_linear ~ gene, data = GWPS_mTOR_meta_NT)
+t.test(pRPS6_ridge ~ gene, data = GWPS_mTOR_meta_NT)
+t.test(pRPS6_linear ~ gene, data = GWPS_mTOR_meta_RN)
+t.test(pRPS6_ridge ~ gene, data = GWPS_mTOR_meta_RN)
+
+plot(p1 + p2)
+```

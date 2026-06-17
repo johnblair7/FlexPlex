@@ -1,0 +1,49 @@
+---
+title: "Figure 2 plots"
+output: github_document
+date: "2026-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(Seurat)
+library(tidyr)
+library(dplyr)
+library(Matrix)
+library(stringr)
+library(ggrepel)
+library(readr)
+library(cowplot)
+library(EnhancedVolcano)
+library(MAGeCKFlute)
+
+options(future.globals.maxSize = 10 * 1024^3)
+```
+
+
+
+Figures 2A,B,D  illustrator files
+
+
+```{r Fig2C, dpi=300, fig.width=10, fig.height=10, dev='png'}
+TvB.gene_summary <- read.delim("/brahms/blairj/PhosphoScreen/Screen6_7/TvB.gene_summary.txt")
+TvB.gene_summary$smaller_value <- pmin(TvB.gene_summary$neg.p.value, TvB.gene_summary$pos.p.value)
+TvB.gene_summary$smaller_rank <- pmin(TvB.gene_summary$neg.rank, TvB.gene_summary$pos.rank)
+TvB.gene_summary$smaller_rank <- (TvB.gene_summary$smaller_rank)/18939
+genes_lab <- c(
+  TvB.gene_summary$id[order(TvB.gene_summary$neg.rank)][1:25],
+  TvB.gene_summary$id[order(TvB.gene_summary$pos.rank)][1:25]
+)
+p1 <- EnhancedVolcano(TvB.gene_summary,TvB.gene_summary$id,"neg.lfc","smaller_value",drawConnectors = T,arrowheads = F,selectLab = genes_lab,xlim = c(-6.5,6.5),ylim = c(0,7),FCcutoff = 1,pCutoff = 0.05,title = NULL,subtitle = NULL)
+
+plot(p1)
+```
+
+```{r Fig2E, dpi=300, fig.width=10, fig.height=10, dev='png'}
+TvB.sgrna_summary <- read.delim("/brahms/blairj/PhosphoScreen/Screen6_7/TvB.sgrna_summary.txt")
+
+p3 = sgRankView(TvB.sgrna_summary,gene =c("TSC1","TSC2","ITFG2","MAP4K5","C12orf66","TTI2","SUGT1","SEM1","RPTOR","GFI1B"),top=0,bottom = 0)
+
+plot(p3)
+```

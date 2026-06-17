@@ -1,0 +1,189 @@
+---
+title: "Figure 1 plots"
+output: github_document
+date: "2026-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(Seurat)
+library(tidyr)
+library(dplyr)
+library(Matrix)
+library(stringr)
+library(ggrepel)
+library(readr)
+library(cowplot)
+
+options(future.globals.maxSize = 10 * 1024^3)
+```
+
+First, start by loading in the object 
+
+```{r Load in Object}
+pilot_all <- readRDS("/brahms/blairj/FLEX/FLEX8/pilot_prefilt.rds")
+```
+
+Figures 1A,B,C all illustrator files
+
+
+```{r Fig1D, dpi=300, fig.width=5, fig.height=10, dev='png'}
+Idents(pilot_all) <- "HTO_classification.global"
+guides_sub <- subset(pilot_all,idents = c("TSX1","TSX2","TSX3"))
+guides_sub <- MULTIseqDemux(guides_sub,assay = "HTO")
+guides_sub <- subset(guides_sub,idents = c("TSX1","TSX2","TSX3"))
+Idents(guides_sub) <- "GDO_classification.global"
+DefaultAssay(guides_sub) <- "GDO"
+cd55_guide_sub <- subset(guides_sub,idents = c("CD55-1","CD55-2","CD55-3","Doublet","Negative"))
+Idents(cd55_guide_sub) <- "GDO3_classification.global"
+tsc_guide_sub <- subset(guides_sub,idents = c("TSC1-1","TSC1-2","TSC1-3","RPTOR-1","RPTOR-2","RPTOR-3","Doublet","Negative"))
+Idents(tsc_guide_sub) <- "GDO3_classification.global"
+
+cd55_guide_sub <- RenameIdents(object = cd55_guide_sub, "Negative" = "Negative", "CD55" = "CD55",
+                               "TSC1" = "Other","MADCAM1" = "Other","Doublet" = "Doublet",
+                               "NT" = "Other","RPTOR" = "Other","GATA2" = "Other","GATA1" = "Other")
+
+p1 <- FeatureScatter(cd55_guide_sub,"CD55-1","CD55-2") + NoLegend()
+
+
+tsc_guide_sub <- RenameIdents(object = tsc_guide_sub, "Negative" = "Negative", "CD55" = "Other",
+                               "TSC1" = "TSC1","MADCAM1" = "Other","Doublet" = "Doublet",
+                               "NT" = "Other","RPTOR" = "RPTOR","GATA2" = "Other","GATA1" = "Other")
+
+
+p2 <- FeatureScatter(tsc_guide_sub,"TSC1-1","RPTOR-1") + NoLegend()
+
+plot_grid(p1,p2,ncol =1)
+```
+
+```{r Fig1E, dpi=300, fig.width=15, fig.height=5, dev='png'}
+pilot_all <- MULTIseqDemux(pilot_all,assay = "HTO")
+levels(pilot_all) <- c("TSX1","TSX2","TSX3","Doublet","Negative")
+
+
+p3 <- FeatureScatter(pilot_all,"TSX2","TSX3",slot = "counts") + NoLegend() + ggtitle(NULL)
+p1 <- FeatureScatter(pilot_all,"TSX1","TSX2",slot = "counts") + NoLegend() + ggtitle(NULL)
+p2 <- FeatureScatter(pilot_all,"TSX1","TSX3",slot = "counts") + NoLegend() + ggtitle(NULL)
+
+plot_grid(p1,p2,p3,ncol = 3)
+```
+
+```{r Fig1F, dpi=300, fig.width=15, fig.height=5, dev='png'}
+Idents(guides_sub) <- "GDO3_classification.global"
+cd55 <- AggregateExpression(guides_sub,assays = "RNA",return.seurat = T)
+cd55 <- NormalizeData(cd55)
+
+avg_exp <- GetAssayData(cd55,assay = "RNA")
+avg_exp <- as.data.frame(avg_exp)
+
+
+p1 <- ggplot(avg_exp, aes(x = NT, y = CD55)) +
+  geom_point(color = "black", size = 3) +
+  geom_text(aes(label = ifelse(rownames(avg_exp) == "CD55", "CD55", "")),
+            hjust = -0.2, vjust = -0.5, color = "red") +
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, color = "black") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank()  # Remove gridlines
+  )
+
+plot(p1)
+```
+```{r Fig1G, dpi=300, fig.width=15, fig.height=5, dev='png'}
+Idents(guides_sub) <- "GDO_classification.global"
+cd55_sub <- subset(guides_sub,idents = c("NT-1","NT-2","NT-3","CD55-1","CD55-2","CD55-3"))
+levels(cd55_sub) <- c("NT-1","NT-2","NT-3","CD55-1","CD55-2","CD55-3")
+
+
+cd55_sub_CD55 <- GetAssayData(cd55_sub,assay = "ADT")
+cd55_sub_CD55 <- as.data.frame(cd55_sub_CD55)
+cd55_sub_CD55 <- as.data.frame(t(cd55_sub_CD55))
+cd55_sub_CD55_md <- cd55_sub@meta.data     
+cd55_sub_CD55$ident <- cd55_sub_CD55_md$GDO_classification.global
+
+# Reorder the factor levels for the x-axis
+cd55_sub_CD55$ident <- factor(cd55_sub_CD55$ident, levels = c("NT-1","NT-2","NT-3","CD55-1","CD55-2","CD55-3"))
+
+
+p1 <- ggplot(cd55_sub_CD55, aes(x = ident, y = CD55, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("NT-1" = "grey", 
+                               "NT-2" = "grey", 
+                               "NT-3"= "grey",
+                               "CD55-1" = "#F8766D", 
+                               "CD55-2"= "#F8766D",
+                               "CD55-3"= "#F8766D")) +
+  theme_minimal() + NoLegend()
+plot(p1)
+```
+```{r Fig1H, dpi=300, fig.width=15, fig.height=5, dev='png'}
+Idents(guides_sub) <- "GDO3_classification.global"
+fc.name = "avg_log2FC"
+logfc.threshold = 1
+max.genes = 10
+pval.cutoff = 0.05
+assay = "RNA"
+all.markers <- FindMarkers(guides_sub,ident.1 = "TSC1",ident.2 = "NT",assay = "RNA")
+pos.markers <- all.markers[which(x = all.markers[,fc.name] > (logfc.threshold)), ]
+neg.markers <- all.markers[which(x = all.markers[,fc.name] < (-logfc.threshold)), ]
+marker.list <- c(rownames(x = subset(x = pos.markers,p_val < pval.cutoff))[1:max.genes])
+marker.list <- c(rownames(x = subset(x = neg.markers,p_val < pval.cutoff))[1:max.genes],marker.list)
+
+
+sub2 <- subset(guides_sub,idents = c("TSC1","NT"))
+rna_assay <- GetAssayData(sub2,assay = "RNA")
+features2 <- rownames(rna_assay)
+sub2 <- ScaleData(sub2,features = features2,assay = "RNA")
+p1 <- DoHeatmap(sub2,marker.list,assay = "RNA",slot = "scale.data",draw.lines = T,lines.width = 5) + NoLegend()
+
+plot(p1)
+```
+
+```{r Fig1I, dpi=300, fig.width=15, fig.height=5, dev='png'}
+Idents(guides_sub) <- "GDO_classification.global"
+rptor_sub <- subset(guides_sub,idents = c("NT-1","NT-2","NT-3","TSC1-1","TSC1-2","TSC1-3","RPTOR-1","RPTOR-3"))
+Idents(rptor_sub) <- "GDO3_classification.global"
+rptor_sub <- subset(rptor_sub,idents = c("NT","TSC1","RPTOR"))
+levels(rptor_sub) <- c("NT","RPTOR","TSC1")
+
+rptor_sub_pRPS6 <- GetAssayData(rptor_sub,assay = "ADT")
+rptor_sub_pRPS6 <- as.data.frame(rptor_sub_pRPS6)
+rptor_sub_pRPS6 <- as.data.frame(t(rptor_sub_pRPS6))
+rptor_sub_pRPS6_md <- rptor_sub@meta.data     
+rptor_sub_pRPS6$ident <- rptor_sub_pRPS6_md$GDO3_classification.global
+
+# Reorder the factor levels for the x-axis
+rptor_sub_pRPS6$ident <- factor(rptor_sub_pRPS6$ident, levels = c("NT","RPTOR","TSC1"))
+
+
+p1 <- ggplot(rptor_sub_pRPS6, aes(x = ident, y = pRPS6, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("NT" = "grey", 
+                               "RPTOR" = "#00BFC4", 
+                               "TSC1"= "#C77CFF")) +
+  theme_minimal() + theme(axis.title = element_blank()) + NoLegend()
+
+p2 <- ggplot(rptor_sub_pRPS6, aes(x = ident, y = RPS6, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("NT" = "grey", 
+                               "RPTOR" = "#00BFC4", 
+                               "TSC1"= "#C77CFF")) +
+  theme_minimal() + theme(axis.title = element_blank()) + NoLegend()
+
+
+plot_grid(p1,p2)
+```
+``` {r FigS1, dpi=300, fig.width=15, fig.height=5, dev='png'}
+Idents(guides_sub) <- "GDO_classification.global"
+counts_sub <- subset(guides_sub,idents = c("NT-1","NT-2","NT-3","TSC1-1","TSC1-2","TSC1-3","RPTOR-1","RPTOR-3","CD55-1","CD55-2","CD55-3"))
+md <- guides_sub@meta.data
+
+p1 <- ggplot(md, aes(x = "",y = nCount_RNA)) + geom_boxplot() + scale_y_log10() + labs(y = NULL, x = NULL) + theme_minimal()
+p2 <- ggplot(md, aes(x = "",y = nCount_ADT)) + geom_boxplot() + scale_y_log10() + labs(y = NULL, x = NULL) + theme_minimal()
+p3 <- ggplot(md, aes(x = "",y = nCount_GDO)) + geom_boxplot() + scale_y_log10()  + labs(y = NULL, x = NULL) + theme_minimal()
+p4 <- ggplot(md, aes(x = "",y = nCount_HTO)) + geom_boxplot()  + scale_y_log10() + labs(y = NULL, x = NULL) + theme_minimal()
+
+plot_grid(p1,p2,p3,p4,ncol = 4)
+```
