@@ -1,0 +1,569 @@
+---
+title: "Fig6"
+output: html_document
+date: "2026-06-11"
+---
+---
+title: "Figure 6 plots"
+output: github_document
+date: "2026-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(Seurat)
+library(tidyr)
+library(dplyr)
+library(Matrix)
+library(stringr)
+library(ggrepel)
+library(readr)
+library(cowplot)
+library(ggplot2)
+library(tibble)
+library(scales)
+
+options(future.globals.maxSize = 10 * 1024^3)
+```
+
+
+``` {r Fig6A, dpi=300, fig.width=10, fig.height=5, dev='png'}
+####### Finding the input genes
+Idents(FLEX8) <- "GDO_comb"
+MTOR_DE <- FindMarkers(FLEX8,ident.2 = "NO",ident.1 = c("MTOR","RPTOR"),only.pos = F)
+MED_DE <- FindMarkers(FLEX8,ident.2 = "NO",ident.1 = c("MED12","MED19","MED30"),only.pos = F)
+TSC1_DE <- FindMarkers(FLEX8,ident.2 = "NO",ident.1 = c("TSC1"),only.pos = F)
+
+MTOR_DE %>%
+  dplyr::filter(p_val_adj < 0.05) %>%
+  slice_head(n = 20) %>%
+  ungroup() -> MTOR_DE
+MTOR_DE$gene <- rownames(MTOR_DE)
+
+MED_DE %>%
+  dplyr::filter(p_val_adj < 0.05) %>%
+  slice_head(n = 20) %>%
+  ungroup() -> MED_DE
+MED_DE$gene <- rownames(MED_DE)
+
+TSC1_DE %>%
+  dplyr::filter(p_val_adj < 0.05) %>%
+  slice_head(n = 20) %>%
+  ungroup() -> TSC1_DE
+TSC1_DE$gene <- rownames(TSC1_DE)
+
+ATF6_UPR <- read.table("ATF6_UPR.txt")
+IRE1a_UPR <- read.table("IRE1a_UPR.txt")
+PERK_up <- read.table("PERK_up.txt")
+
+#######
+Idents(Validation) <- "GDO_comb"
+pseudo_ifnb <- AggregateExpression(Validation,assays = "RNA",return.seurat = T)
+
+##########
+pseudo_sub <- subset(pseudo_ifnb,idents = c("PSMD13","NOL9","ETV4","MIOS","THG1L",
+"TFRC","ATRIP","DNAJC19","VIM","MAPRE3",
+"FUNDC2","FOXN1","SEC61G","ADAM10","RPS6KA1",
+"TAF1","TIMM23B","PLCG1","WDTC1","HAUS2","NR2E1","SIRT7","CD55"),invert = T)
+DefaultAssay(pseudo_sub) <- "RNA"
+pseudo_sub <- NormalizeData(pseudo_sub)
+pseudo_sub <- ScaleData(pseudo_sub,assay = "RNA",features = features2)
+
+psuedo_mat <- GetAssayData(pseudo_sub,assay = "RNA",layer = "scale.data")
+mat_subset <- psuedo_mat[rownames(psuedo_mat) %in% c(PERK_up$V1,ATF6_UPR$V1,IRE1a_UPR$V1,TSC1_DE$gene,MTOR_DE$gene,MED_DE$gene), ]
+
+set.seed(1)
+k_samples <- 7  # Adjust as needed
+kmeans_samples <- kmeans(t(mat_subset), centers = k_samples, nstart = 25)
+sample_clusters <- kmeans_samples$cluster
+
+# Order genes and samples
+gene_order <- order(gene_clusters)
+sample_order <- order(sample_clusters)
+
+expr_ordered <- mat_subset[gene_order, sample_order]
+gene_clusters_ordered <- gene_clusters[gene_order]
+sample_clusters_ordered <- sample_clusters[sample_order]
+
+library(ComplexHeatmap)
+library(RColorBrewer)
+
+# Color palettes
+gene_cluster_colors <- setNames(RColorBrewer::brewer.pal(k_genes, "Set3"), as.character(1:k_genes))
+sample_cluster_colors <- setNames(RColorBrewer::brewer.pal(k_samples, "Set3"), as.character(1:k_samples))
+
+# Annotations
+row_anno <- rowAnnotation(Cluster = factor(gene_clusters_ordered),
+                          col = list(Cluster = gene_cluster_colors))
+
+col_anno <- HeatmapAnnotation(Cluster = factor(sample_clusters_ordered),
+                              col = list(Cluster = sample_cluster_colors))
+
+
+custom_sample_cluster_order <- c(5,2,4,7,3,6,1)
+column_split_factor <- factor(sample_clusters_ordered,
+                              levels = custom_sample_cluster_order)
+
+# Convert sample cluster assignments to a data frame
+sample_df <- data.frame(ID = names(sample_clusters_ordered),
+                        Cluster = sample_clusters_ordered)
+
+flex8_clust_sub <- subset(Validation,idents = c("PSMD13","NOL9","ETV4","MIOS","THG1L",
+                                            "TFRC","ATRIP","DNAJC19","VIM","MAPRE3",
+                                            "FUNDC2","FOXN1","SEC61G","ADAM10","RPS6KA1",
+                                            "TAF1","TIMM23B","PLCG1","WDTC1","HAUS2","NR2E1","SIRT7","CD55"),invert = T)
+FLEX_meta <- flex8_clust_sub@meta.data
+
+median_data_FLEX <- FLEX_meta %>%
+  group_by(GDO_comb) %>%
+  summarise(
+    median_pRPS6_ridge = median(pRPS6_ridge_GWPS),
+  )
+
+median_data_FLEX$ID <- median_data_FLEX$GDO_comb
+
+rownames(median_data_FLEX) <- median_data_FLEX$ID
+nt_med <- median_data_FLEX["NO","median_pRPS6_ridge"]
+nt <- nt_med[[1]][1]
+median_data_FLEX$delta_pRPS6 <- median_data_FLEX$median_pRPS6_ridge - nt
+
+# Convert sample cluster assignments to a data frame
+sample_df <- data.frame(ID = names(sample_clusters_ordered),
+                        Cluster = sample_clusters_ordered)
+
+# Join with your metadata
+sample_df <- merge(sample_df, median_data_FLEX, by = "ID")  # assuming sample_metadata has "Sample" column
+
+sample_df <- sample_df[order(sample_df$Cluster, -sample_df$delta_pRPS6), ]
+sample_df$ID <- factor(sample_df$ID, levels = sample_df$ID)
+
+# Convert Cluster to a factor with the custom order
+sample_df$Cluster <- factor(sample_df$Cluster,
+                            levels = custom_sample_cluster_order)
+
+p4 <- ggplot(sample_df, aes(x = ID, y = delta_pRPS6)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Cluster, scales = "free_x", space = "free") +  # keeps cluster separation
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        panel.grid.major.x = element_blank(),  # removes vertical grid lines
+        panel.grid.minor.x = element_blank(),axis.title = element_blank(),
+        axis.text.x.bottom = element_blank(),panel.grid.minor.y = element_blank()) 
+
+plot(p4)
+
+# Ensure Sample column is character (in the right order)
+ordered_sample_names <- as.character(sample_df$ID)
+
+# Reorder expression matrix
+expr_final <- expr_ordered[, ordered_sample_names]
+
+sample_clusters_ordered <- sample_df$Cluster
+names(sample_clusters_ordered) <- ordered_sample_names
+
+custom_gene_cluster_order <- c(4,5,7,6,1,3,2)
+row_split_factor <- factor(gene_clusters_ordered,
+                           levels = custom_gene_cluster_order)
+
+
+p5 <- Heatmap(expr_final,
+              name = "Z-score",
+              cluster_rows = FALSE,
+              cluster_columns = FALSE,  # we already ordered columns manually
+              row_split = row_split_factor,  # or however you split rows
+              column_split = sample_clusters_ordered,     # uses your cluster facetting
+              top_annotation = NULL,
+              show_row_names = FALSE,
+              show_column_names = TRUE,
+              col = circlize::colorRamp2(c(-2, 0, 2), c("blue", "white", "red")))
+
+plot(p4)
+```
+
+``` {r Fig6Apanel2, dpi=300, fig.width=10, fig.height=5, dev='png'}
+plot(p5)
+```
+
+``` {r Fig6B, dpi=300, fig.width=10, fig.height=5, dev='png'}
+Idents(Validation) <- "GDO_comb"
+sub <- subset(Validation,idents = c("MTOR","RPTOR","RHEB","LAMTOR3","LAMTOR2","RRAGA","RRAGC","TSC1","DEPDC5","NPRL2","NPRL3"))
+
+Idents(sub) <- "Complex"
+sub_genes <- GetAssayData(sub,assay = "RNA")
+sub_genes <- as.data.frame(sub_genes)
+sub_genes <- as.data.frame(t(sub_genes))
+sub_genes$ident <- sub$complex
+
+# Reorder the factor levels for the x-axis
+sub_genes$ident <- factor(sub_genes$ident, levels = c("MTORC1","RAGULATOR","TSC","GATOR1"))
+
+p1 <- ggplot(sub_genes, aes(x = ident, y = BTG1, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("MTORC1" = "#F8766D", 
+                               "RAGULATOR" = "#7CAE00", 
+                               "TSC"= "#00BFC4",
+                               "GATOR1" = "#C77CFF")) +
+  theme_minimal() + theme(axis.title = element_blank()) + NoLegend()
+
+p2 <- ggplot(sub_genes, aes(x = ident, y = SOCS2, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("MTORC1" = "#F8766D", 
+                               "RAGULATOR" = "#7CAE00", 
+                               "TSC"= "#00BFC4",
+                               "GATOR1" = "#C77CFF")) +
+  theme_minimal() + theme(axis.title = element_blank()) + NoLegend()
+
+p3 <- ggplot(sub_genes, aes(x = ident, y = MAP1B, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("MTORC1" = "#F8766D", 
+                               "RAGULATOR" = "#7CAE00", 
+                               "TSC"= "#00BFC4",
+                               "GATOR1" = "#C77CFF")) +
+  theme_minimal() + theme(axis.title = element_blank()) + NoLegend()
+
+p4 <- ggplot(sub_genes, aes(x = ident, y = IDH1, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("MTORC1" = "#F8766D", 
+                               "RAGULATOR" = "#7CAE00", 
+                               "TSC"= "#00BFC4",
+                               "GATOR1" = "#C77CFF")) +
+  theme_minimal() + theme(axis.title = element_blank()) + NoLegend()
+
+
+p5 <- ggplot(sub_genes, aes(x = ident, y = ALDH1A1, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("MTORC1" = "#F8766D", 
+                               "RAGULATOR" = "#7CAE00", 
+                               "TSC"= "#00BFC4",
+                               "GATOR1" = "#C77CFF")) +
+  theme_minimal() + theme(axis.title = element_blank()) + NoLegend()
+
+p6 <- ggplot(sub_genes, aes(x = ident, y = LCP1, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("MTORC1" = "#F8766D", 
+                               "RAGULATOR" = "#7CAE00", 
+                               "TSC"= "#00BFC4",
+                               "GATOR1" = "#C77CFF")) +
+  theme_minimal() + theme(axis.title = element_blank()) + NoLegend()
+
+
+plot_grid(p1,p2,p3,p4,p5,p6)
+
+genes_to_test <- c(
+  "BTG1",
+  "SOCS2",
+  "MAP1B",
+  "IDH1",
+  "ALDH1A1",
+  "LCP1"
+)
+
+pairwise_table <- do.call(rbind, lapply(genes_to_test, function(gene) {
+  
+  pairwise_results <- pairwise.t.test(
+    x = sub_genes[[gene]],
+    g = sub_genes$ident,
+    p.adjust.method = "BH",
+    pool.sd = FALSE
+  )
+  
+  result_df <- as.data.frame(as.table(pairwise_results$p.value))
+  
+  colnames(result_df) <- c("group1", "group2", "p_adj")
+  
+  result_df$gene <- gene
+  
+  result_df <- result_df[!is.na(result_df$p_adj), ]
+  
+  result_df <- result_df[, c("gene", "group1", "group2", "p_adj")]
+  
+  return(result_df)
+}))
+
+pairwise_table
+
+
+```
+
+``` {r Fig6D, dpi=300, fig.width=10, fig.height=5, dev='png'}
+s.genes <- cc.genes.updated.2019$s.genes
+g2m.genes <- cc.genes.updated.2019$g2m.genes
+
+Validation <- CellCycleScoring(
+  object = Validation,
+  s.features = s.genes,
+  g2m.features = g2m.genes,
+  set.ident = FALSE
+)
+
+summary <- Validation@meta.data %>%
+  group_by(GDO_comb) %>%
+  summarise(
+    Cluster6 = median(Cluster6, na.rm = TRUE),
+    G2M_proportion = mean(Phase == "G2M", na.rm = TRUE),
+    n_cells = n(),
+    .groups = "drop"
+  )
+
+ggplot(summary, aes(x = Cluster6, y = G2M_proportion)) +
+  # Add thicker zero lines
+  geom_point(color = "black", size = 3) +# Thicker vertical line# Plot median points
+  geom_text_repel(aes(label = ifelse(GDO_comb %in% c("MED12","MED19","MED30","PSMD4","ASCC3","GPN3"), GDO_comb, NA)),
+                  color = "red", size = 4,
+                  box.padding = 0.5, max.overlaps = Inf
+  ) +
+  labs(
+    title = "Anabolism vs G2M",
+    x = "Anabolism",
+    y = "% Cells G2M"
+  ) +
+  theme_minimal()
+
+```
+
+``` {r Fig6E, dpi=300, fig.width=10, fig.height=5, dev='png'}
+
+
+
+data_subset <- subset(df,GDO_comb %in% c("MED12","MED19","MED30","PSMD4","ASCC3","GPN3","NO"))
+
+p1 <- ggplot(data_subset, aes(x = GDO_comb, y = prop, fill = Phase)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = c("G1" = "#F8766D", "S" = "#619CFF", "G2M" = "#00BA38")) +
+  labs(title = "Stacked Proportional Barplot",
+       x = "Ident",
+       y = "Proportion",
+       fill = "Phase") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),axis.title = element_blank()) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+plot(p1)
+```
+
+
+``` {r FigS6B, dpi=300, fig.width=10, fig.height=5, dev='png'}
+data_subset <- subset(df,GDO_comb %in% c("AARS","NARS","MED12","MED19","MED30","NO","NO","ASCC3","GPN3","PSMD4","MED12","MED19","MED30","TSC1","DEPDC5","NPRL2","NPRL3","MTOR","RPTOR","NO","EEF1G","EIF2B3","EIF2B5","EIF3H","EIF3D","TTI1","KDM1A","GFI1B","RACK1"))
+
+p1 <- ggplot(data_subset, aes(x = GDO_comb, y = prop, fill = Phase)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = c("G1" = "#F8766D", "S" = "#619CFF", "G2M" = "#00BA38")) +
+  labs(title = "Stacked Proportional Barplot",
+       x = "Ident",
+       y = "Proportion",
+       fill = "Phase") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),axis.title = element_blank()) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+plot(p1)
+```
+
+``` {r Fig6F, dpi=300, fig.width=10, fig.height=5, dev='png'}
+Idents(Validation) <- "Phase"
+G1_sub <- subset(Validation, idents = "G1")
+S_sub <- subset(Validation, idents = "S")
+G2M_sub <- subset(Validation, idents = "G2M")
+
+Idents(G1_sub) <- "GDO_comb"
+Idents(G2M_sub) <- "GDO_comb"
+Idents(S_sub) <- "GDO_comb"
+G1_sub_F <- subset(G1_sub,idents = c("NO","TSC1","RPTOR","MED12","MED19"))
+S_sub_F <- subset(S_sub,idents = c("NO","TSC1","RPTOR","MED12","MED19"))
+G2M_sub_F <- subset(G2M_sub,idents = c("NO","TSC1","RPTOR","MED12","MED19"))
+levels(G1_sub_F) <- c("TSC1","NO","RPTOR","MED12","MED19")
+levels(S_sub_F) <- c("TSC1","NO","RPTOR","MED12","MED19")
+levels(G2M_sub_F) <- c("TSC1","NO","RPTOR","MED12","MED19")
+
+G1_sub_F_pRPS6 <- GetAssayData(G1_sub_F,assay = "ADT")
+G1_sub_F_pRPS6 <- as.data.frame(G1_sub_F_pRPS6)
+G1_sub_F_pRPS6 <- as.data.frame(t(G1_sub_F_pRPS6))
+G1_sub_F_md <- G1_sub_F@meta.data     
+G1_sub_F_pRPS6$ident <- G1_sub_F_md$GDO_comb
+G1_sub_F_pRPS6$ident <- factor(G1_sub_F_pRPS6$ident, levels = c("TSC1","NO","RPTOR","MED12","MED19"))
+p1 <- ggplot(G1_sub_F_pRPS6, aes(x = ident, y = pRPS6, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("TSC1" = "#F8766D", 
+                               "NO" = "grey", 
+                               "RPTOR"= "#F8766D",
+                               "MED12" = "#F8766D", 
+                               "MED19"= "#F8766D")) +
+  theme_minimal() + NoLegend() + theme(axis.title = element_blank(),axis.text.x = element_text(angle = 45, hjust = 1)) + ylim(1.5,5.5)
+
+S_sub_F_pRPS6 <- GetAssayData(S_sub_F,assay = "ADT")
+S_sub_F_pRPS6 <- as.data.frame(S_sub_F_pRPS6)
+S_sub_F_pRPS6 <- as.data.frame(t(S_sub_F_pRPS6))
+S_sub_F_md <- S_sub_F@meta.data     
+S_sub_F_pRPS6$ident <- S_sub_F_md$GDO_comb
+S_sub_F_pRPS6$ident <- factor(S_sub_F_pRPS6$ident, levels = c("TSC1","NO","RPTOR","MED12","MED19"))
+p2 <- ggplot(S_sub_F_pRPS6, aes(x = ident, y = pRPS6, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("TSC1" = "#619CFF", 
+                               "NO" = "grey", 
+                               "RPTOR"= "#619CFF",
+                               "MED12" = "#619CFF", 
+                               "MED19"= "#619CFF")) +
+  theme_minimal() + NoLegend() + theme(axis.title = element_blank(),axis.text.x = element_text(angle = 45, hjust = 1)) + ylim(1.5,5.5)
+
+G2M_sub_F_pRPS6 <- GetAssayData(G2M_sub_F,assay = "ADT")
+G2M_sub_F_pRPS6 <- as.data.frame(G2M_sub_F_pRPS6)
+G2M_sub_F_pRPS6 <- as.data.frame(t(G2M_sub_F_pRPS6))
+G2M_sub_F_md <- G2M_sub_F@meta.data     
+G2M_sub_F_pRPS6$ident <- G2M_sub_F_md$GDO_comb
+G2M_sub_F_pRPS6$ident <- factor(G2M_sub_F_pRPS6$ident, levels = c("TSC1","NO","RPTOR","MED12","MED19"))
+p3 <- ggplot(G2M_sub_F_pRPS6, aes(x = ident, y = pRPS6, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("TSC1" = "#00BA38", 
+                               "NO" = "grey", 
+                               "RPTOR"= "#00BA38",
+                               "MED12" = "#00BA38", 
+                               "MED19"= "#00BA38")) +
+  theme_minimal() + NoLegend() + theme(axis.title = element_blank(),axis.text.x = element_text(angle = 45, hjust = 1)) + ylim(1.5,5.5)
+
+
+plot_grid(p1,p2,p3,ncol =3)
+```
+
+``` {r Fig6G, dpi=300, fig.width=10, fig.height=5, dev='png'}
+qPCR_results <- read_csv("/brahms/blairj/FLEX/FLEX8/qPCR_results_box.csv")
+p1 <- ggplot(qPCR_results, aes(x = Targ_Treat, y = sXBP1_tXBP1, fill = Target)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c(
+    "NT" = "grey70",
+    "PPA1" = "#F8766D",
+    "DHDDS" = "#7CAE00"
+  )) + 
+  theme_classic()
+plot(p1)
+
+PPA1_C_p <- t.test(
+  sXBP1_tXBP1 ~ Targ_Treat,
+  data = subset(qPCR_results, Targ_Treat %in% c("PPA1_C", "NT_C"))
+)
+
+NT_T_p <- t.test(
+  sXBP1_tXBP1 ~ Targ_Treat,
+  data = subset(qPCR_results, Targ_Treat %in% c("NT_T", "NT_C"))
+)
+
+DHDDS_C_p <- t.test(
+  sXBP1_tXBP1 ~ Targ_Treat,
+  data = subset(qPCR_results, Targ_Treat %in% c("DHDDS_C", "NT_C"))
+)
+```
+
+``` {r Fig6I, dpi=300, fig.width=10, fig.height=5, dev='png'}
+# Create data frame
+df <- data.frame(
+  NT = c(1.567848014, 0.560132715, 0.917959278, 1.086919924),
+  AARS = c(1.739789961, 1.220771823, 3.355173509, 2.860957359),
+  RACK1 = c(2.490683122, 1.878233777, 4.252073806, 4.169747026)
+)
+
+t.test(df$NT,df$AARS)
+t.test(df$NT,df$RACK1)
+
+df_long <- df %>%
+  pivot_longer(cols = everything(),
+               names_to = "Condition",
+               values_to = "Value")
+
+df_long$Condition <- factor(
+  df_long$Condition,
+  levels = c("NT", "AARS", "RACK1")
+)
+
+p1 <- ggplot(df_long, aes(x = Condition, y = Value)) +
+  geom_boxplot(width = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.1, size = 2) +
+  theme_classic() +
+  labs(
+    title = "ATF4",
+    x = "",
+    y = "Value"
+  )
+
+df <- data.frame(
+  NT = c(1.018884253,
+         0.978960573,
+         0.880592662,
+         1.156663332),
+  AARS = c(0.042329873,
+           0.035444008,
+           0.454965047,
+           0.467437116),
+  RACK1 = c(0.040730594,
+            0.040835197,
+            0.943316021,
+            0.906179789)
+)
+
+t.test(df$NT,df$AARS)
+t.test(df$NT,df$RACK1)
+
+df_long <- df %>%
+  pivot_longer(cols = everything(),
+               names_to = "Condition",
+               values_to = "Value")
+
+df_long$Condition <- factor(
+  df_long$Condition,
+  levels = c("NT", "AARS", "RACK1")
+)
+
+p2 <- ggplot(df_long, aes(x = Condition, y = Value)) +
+  geom_boxplot(width = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.1, size = 2) +
+  theme_classic() +
+  labs(
+    title = "pRPS6",
+    x = "",
+    y = "Value"
+  )
+
+####
+df <- data.frame(
+  NT = c(1.001832864,
+         0.997594519,
+         0.744233601,
+         1.271700492),
+  AARS = c(0.398828301,
+           0.503123089,
+           1.557703243,
+           1.175021489),
+  RACK1 = c(0.268502595,
+            0.311299039,
+            2.524368263,
+            2.430656195)
+)
+
+df_long <- df %>%
+  pivot_longer(cols = everything(),
+               names_to = "Condition",
+               values_to = "Value")
+
+df_long$Condition <- factor(
+  df_long$Condition,
+  levels = c("NT", "AARS", "RACK1")
+)
+
+p3 <- ggplot(df_long, aes(x = Condition, y = Value)) +
+  geom_boxplot(width = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.1, size = 2) +
+  theme_classic() +
+  labs(
+    title = "p4EBP1",
+    x = "",
+    y = "Value"
+  )
+
+
+plot_grid(p1,p2,p3,ncol =1)
+```

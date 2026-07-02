@@ -1,0 +1,137 @@
+---
+title: "Processing_Generic"
+output: html_document
+date: "2026-06-11"
+---
+---
+title: "Processing"
+output: github_document
+date: "2026-05-06"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(Seurat)
+library(GenomeInfoDb)
+library(EnsDb.Hsapiens.v86)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(tximport)
+library(devtools)
+library(stringi)
+library(cowplot)
+library(TFBSTools)
+library(RColorBrewer)
+library(glmGamPoi)
+set.seed(1234)
+
+options(future.globals.maxSize = 10 * 1024^3)
+```
+
+```{r}
+options(Seurat.object.assay.calcn = T)
+
+# the 10x hdf5 file contains both data types. 
+inputdata.10x <- Read10X_h5("sample_filtered_feature_bc_matrix.h5")
+
+# Create Seurat object
+obj <- CreateSeuratObject(counts = inputdata.10x)
+
+data <- obj@meta.data
+row_names <- rownames(data)
+new_vec <- gsub("-1", "", row_names)
+new_df <- data.frame(V1 = new_vec)
+write.table(new_df,"cb.txt")
+
+#### Here you use the cb.txt file as input into the ADT, HTO and GDO quantification scripts
+
+##############
+g.matrix <- read.table(file="guide_counts.txt")
+cb <- read.table("cb.txt", header=FALSE)
+g <- read.table("guides.txt", header=FALSE)
+colnames(g.matrix) <- g$V1
+rownames(g.matrix) <- paste0(cb$V1[1:20593], "-1")
+
+common.cells <- intersect(rownames(g.matrix),colnames(obj@assays$RNA))
+obj <- subset(obj, cells = common.cells)
+
+subset_matrix <- g.matrix[common.cells, ]
+obj[['GDO']] <- CreateAssayObject(counts = t(subset_matrix))
+
+#########
+obj <- NormalizeData(obj,assay = "GDO", normalization.method = "CLR", margin = 2, verbose = F)
+obj <- MULTIseqDemux(obj, assay = "GDO", quantile = 0.5)
+obj$GDO_classification <- obj$MULTI_classification
+#Name cells with two guides called as a doublet
+obj$GDO_classification.global <- sub(pattern = ".*_.*",replacement = "Doublet",x = obj$GDO_classification)
+
+##############
+g.matrix <- read.table(file="hto_counts.txt")
+cb <- read.table("cb.txt", header=FALSE)
+g <- read.table("hto.txt", header=FALSE)
+colnames(g.matrix) <- g$V1
+rownames(g.matrix) <- paste0(cb$V1[1:20593], "-1")
+
+common.cells <- intersect(rownames(g.matrix),colnames(obj@assays$RNA))
+obj <- subset(obj, cells = common.cells)
+subset_matrix <- g.matrix[common.cells, ]
+obj[['HTO']] <- CreateAssayObject(counts = t(subset_matrix))
+hto <- rownames(obj@assays$HTO@counts)
+
+obj <- NormalizeData(obj,assay = "HTO", normalization.method = "CLR", margin = 2, verbose = F)
+obj <- MULTIseqDemux(obj, assay = "HTO", quantile = 0.3)
+obj$HTO_classification <- obj$MULTI_classification
+#Name cells with two guides called as a doublet
+obj$HTO_classification.global <- sub(pattern = ".*_.*",replacement = "Doublet",x = obj$HTO_classification)
+
+DefaultAssay(obj) <- "HTO"
+obj <- FindVariableFeatures(obj, selection.method = "vst", nfeatures = 2000)
+obj <- ScaleData(obj)
+obj <- RunPCA(obj,dims = 1:7)
+obj <- RunUMAP(obj,dims = 1:7, reduction.name = 'hto.umap', reduction.key = 'HTOUMAP_')
+obj <- FindNeighbors(obj, dims = 1:7)
+obj <- FindClusters(obj, resolution = 1.0)
+
+Idents(obj) <- "HTO_classification.global"
+obj <- subset(obj,idents = c("Doublet","Negative"),invert = T)
+
+Idents(obj) <- "GDO_classification.global"
+obj <- subset(obj,idents = c("Doublet","Negative"),invert = T)
+
+
+g.matrix <- read.table(file="adt_counts.txt")
+cb <- read.table("cb.txt", header=FALSE)
+g <- read.table("adt.txt", header=FALSE)
+colnames(g.matrix) <- g$V1
+rownames(g.matrix) <- paste0(cb$V1[1:20593], "-1")
+
+common.cells <- intersect(rownames(g.matrix),colnames(obj@assays$RNA))
+obj <- subset(obj, cells = common.cells)
+subset_matrix <- g.matrix[common.cells, ]
+obj[['ADT']] <- CreateAssayObject(counts = t(subset_matrix))
+
+DefaultAssay(obj) <- "ADT"
+obj <- NormalizeData(obj, normalization.method = "CLR", margin = 2, verbose = F)
+VariableFeatures(obj) <- rownames(obj[["ADT"]]@counts)
+obj <- ScaleData(obj, assay = "ADT", verbose = F, do.scale = F)
+obj <- RunPCA(obj)
+obj <- RunUMAP(obj,dims = 1:20, reduction.name = 'umap.adt', reduction.key = 'UMAPADT_')
+obj <- FindNeighbors(obj, dims = 1:20)
+obj <- FindClusters(obj, resolution = 1.0)
+
+# RNA analysis
+DefaultAssay(obj) <- "RNA"
+obj <- NormalizeData(obj)
+obj <- FindVariableFeatures(obj, selection.method = "vst", nfeatures = 20000)
+obj <- ScaleData(obj)
+obj <- RunPCA(obj)
+obj <- RunUMAP(obj,dims = 1:50, reduction.name = 'umap', reduction.key = 'UMAP_')
+obj <- FindNeighbors(obj, dims = 1:50)
+obj <- FindClusters(obj, resolution = 1.0)
+obj <- SCTransform(obj, verbose = FALSE,method="glmGamPoi") %>% RunPCA() %>% RunUMAP(dims = 1:50, reduction.name = 'umap.rna', reduction.key = 'rnaUMAP_')
+
+saveRDS(obj,"obj.rds")
+```

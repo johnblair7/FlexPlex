@@ -1,0 +1,306 @@
+---
+title: "Fig5"
+output: html_document
+date: "2026-06-11"
+---
+---
+title: "Figure 5 plots"
+output: github_document
+date: "2026-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(Seurat)
+library(tidyr)
+library(dplyr)
+library(Matrix)
+library(stringr)
+library(ggrepel)
+library(readr)
+library(cowplot)
+library(ggplot2)
+library(tibble)
+library(scales)
+
+
+
+options(future.globals.maxSize = 10 * 1024^3)
+```
+
+
+``` {r Fig5B, dpi=300, fig.width=10, fig.height=5, dev='png'}
+GWPS_md <- read_csv("/brahms/blairj/FLEX/FLEX8/GWPS_metadata.csv")
+
+genes_keep <- c(
+  "TSC1", "ITFG2", "DEPDC5", "FOXN1", "TELO2", "ATP6V1A",
+  "non-targeting", "NARS", "SIRT7", "MTOR", "SRP72", "MED12",
+  "MED19", "EIF2B5", "ASCC3", "DAD1", "EEF1G", "GPN3", "TAF1",
+  "TAF8", "KDM1A", "SMC3", "EIF3D", "SUPT6H", "AARS", "RPTOR",
+  "DHDDS"
+)
+
+GWPS_md_box <- subset(GWPS_md, gene %in% genes_keep)
+
+median_data_gwps <- GWPS_md_box %>%
+  group_by(gene) %>%
+  summarise(
+    median_pRPS6 = median(pRPS6_ridge))
+
+median_data_gwps <- median_data_gwps[order(median_data_gwps$median_pRPS6, decreasing = TRUE), ,drop=F]
+
+levels_pRPS6 <- median_data_gwps$gene
+
+# Reorder the factor levels for the x-axis
+GWPS_md_box$gene <- factor(GWPS_md_box$gene, levels = c(levels_pRPS6))
+
+# Get default ggplot2 palette for all levels
+default_cols <- hue_pal()(length(genes_keep))
+
+# Name them after the factor levels
+names(default_cols) <- levels(GWPS_md_box$gene)
+
+# Override only NO-TARGET color
+default_cols["non-targeting"] <- "grey"
+
+p1 <- ggplot(GWPS_md_box, aes(x = gene, y = pRPS6_ridge, fill = gene)) +
+  geom_boxplot() +
+  scale_fill_manual(values = default_cols) +
+  theme_minimal() +
+  ylim(1.5, 5) +
+  NoLegend() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+plot(p1)
+```
+
+
+```{r Fig5C, dpi=300, fig.width=10, fig.height=5, dev='png'}
+# Example data
+genes <- TvB.gene_summary$id
+ranks <- TvB.gene_summary$neg.rank # Example ranks
+genes_of_interest <- low_genes_pRPS6  # Genes to highlight
+
+# Create a data frame
+data <- data.frame(
+  gene = genes,
+  rank = ranks,
+  highlight = ifelse(genes %in% genes_of_interest, "red", "gray")  # Highlight color
+)
+
+# Divide the data into 10 bins based on rank
+data2 <- data %>%
+  mutate(
+    bin = cut(rank, breaks = 50, labels = FALSE)  # Create bins
+  )
+
+# Filter data for only red genes
+red_genes_data <- data2 %>% dplyr::filter(highlight == "red")
+
+# Plot histogram for red genes
+p2 <- ggplot(red_genes_data, aes(x = bin)) +
+  geom_histogram(binwidth = 1, fill = "red", color = "black") +  # Histogram for red genes
+  labs(
+    title = "Histogram of Highlighted Genes by Rank Bin",
+    x = "Rank Bin",
+    y = "Count"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  # Remove all grid lines
+    axis.line = element_line(color = "black")  # Optional: add axis lines for clarity
+  )
+
+plot(p2)
+```
+
+```{r Fig5D, dpi=300, fig.width=10, fig.height=5, dev='png'}
+Idents(Validation) <- "GDO_comb"
+Validation_box <- subset(Validation,idents = c("TSC1","ITFG2","DEPDC5","FOXN1","TELO2","ATP6V1A","NO","NARS","SIRT7","MTOR","SRP72","MED12","MED19","EIF2B5","ASCC3","DAD1","EEF1G","GPN3","TAF1","TAF8","KDM1A","SMC3","EIF3D","SUPT6H","AARS","RPTOR","DHDDS"))
+
+###boxplots sane thing
+Validation_box_pRPS6 <- GetAssayData(Validation_box,assay = "ADT")
+Validation_box_pRPS6 <- as.data.frame(Validation_box_pRPS6)
+Validation_box_pRPS6 <- as.data.frame(t(Validation_box_pRPS6))
+Validation_box_pRPS6_md <- Validation_box@meta.data     
+Validation_box_pRPS6$ident <- Validation_box_pRPS6_md$GDO_comb
+
+result_pRPS6 <- Validation_box_pRPS6_md %>%
+  group_by(GDO_comb) %>%
+  summarise(median_pRPS6 = median(pRPS6_measured))
+
+result_pRPS6 <- result_pRPS6[order(result_pRPS6$median_pRPS6, decreasing = TRUE), ,drop=F]
+
+levels_pRPS6 <- result_pRPS6$GDO_comb
+
+# Reorder the factor levels for the x-axis
+Validation_box_pRPS6$ident <- factor(Validation_box_pRPS6$ident, levels = c("DEPDC5","TSC1","FOXN1","ITFG2","NO","NARS","EIF3D","ASCC3","TAF8","ATP6V1A","GPN3","DAD1","EEF1G","RPTOR","MTOR","SRP72","TAF1","EIF2B5","TELO2","KDM1A","SIRT7","DHDDS","SMC3","MED19","AARS","SUPT6H","MED12"))
+
+# Get default ggplot2 palette for all levels
+default_cols <- hue_pal()(length(unique(Validation_box_pRPS6$ident)))
+
+# Name them after the factor levels
+names(default_cols) <- levels(Validation_box_pRPS6$ident)
+
+# Override only NO-TARGET color
+default_cols["NO"] <- "grey"
+
+p2 <- ggplot(Validation_box_pRPS6, aes(x = ident, y = pRPS6, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = default_cols) +
+  theme_minimal() +
+  ylim(2, 5.5) +
+  NoLegend() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+plot(p2)
+
+```
+
+
+```{r Fig5E, dpi=300, fig.width=10, fig.height=5, dev='png'}
+Idents(Validation) <- "GDO_classification.global"
+GDO_class <- as.data.frame(table(Idents(Validation)))
+
+GDO_f8 <- subset(Validation, idents = c("NO-TARGET-177","NO-TARGET-108","SMC3-2","SMC3-4","TAF8-3","TAF8-0","MED12-0","MED12-5"))
+levels(GDO_f8) <- c("NO-TARGET-177","NO-TARGET-108","SMC3-2","SMC3-4","TAF8-3","TAF8-0","MED12-0","MED12-5")
+
+
+###boxplots
+GDO_f8_pRPS6 <- GetAssayData(GDO_f8,assay = "ADT")
+GDO_f8_pRPS6 <- as.data.frame(GDO_f8_pRPS6)
+GDO_f8_pRPS6 <- as.data.frame(t(GDO_f8_pRPS6))
+                    
+GDOf8_md <- GDO_f8@meta.data     
+GDO_f8_pRPS6$ident <- GDOf8_md$GDO_classification.global
+
+library(tidyverse)
+library(ggplot2)
+
+# Reorder the factor levels for the x-axis
+GDO_f8_pRPS6$ident <- factor(GDO_f8_pRPS6$ident, levels = c("NO-TARGET-177","NO-TARGET-108","SMC3-2","SMC3-4","TAF8-3","TAF8-0","MED12-0","MED12-5"))
+
+# Create boxplot with custom fill colors
+p1 <- ggplot(GDO_f8_pRPS6, aes(x = ident, y = pRPS6, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("NO-TARGET-13" = "grey55", 
+                               "NO-TARGET-125" = "grey55", 
+                               "SMC3-2"= "#00BA38","SMC3-4" = "#00BA38", 
+                               "TAF8-3" = "#619CFF", 
+                               "TAF8-0"= "#619CFF",
+                               "MED12-0" = "#F8766D", 
+                               "MED12-5"= "#F8766D")) +
+  theme_minimal() + NoLegend()
+
+png("plots/BoxPlot_byGuideValid.png",width = 2400, height = 1500,res=300)
+plot(p1)
+dev.off()
+
+##significance calculation
+control_group <- "NO-TARGET-177"
+
+pairwise_results <- pairwise.t.test(
+  x = GDO_f8_pRPS6$pRPS6,
+  g = GDO_f8_pRPS6$ident,
+  p.adjust.method = "BH",
+  pool.sd = FALSE
+)
+
+pairwise_results
+
+control_vals <- GDO_f8_pRPS6$pRPS6[GDO_f8_pRPS6$ident == "NO-TARGET-177"]
+mean_control <- mean(control_vals)
+results <- GDO_f8_pRPS6 %>%
+  filter(ident != "NO-TARGET-177") %>%
+  group_by(ident) %>%
+  summarise(
+    mean_group = mean(pRPS6),
+    log2FC = log2(mean_group / mean_control),
+    percent_change = (2^log2FC - 1) * 100,
+    p_value = t.test(pRPS6, control_vals)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))
+
+results
+
+```
+
+
+``` {r Fig5F, dpi=300, fig.width=10, fig.height=5, dev='png'}
+########
+G_meta <- GWPS_flex8genes@meta.data
+
+# Calculate medians for each gene
+median_data_GWPS <- G_meta %>%
+  group_by(gene) %>%
+  summarise(median_pRPS6 = median(pRPS6_ridge))
+
+adt_data <- as.data.frame(t(as.data.frame(GetAssayData(FLEX8,assay = "ADT"))))
+FLEX8$pRPS6_measured <- adt_data$pRPS6
+
+# Extract the metadata from the Seurat object
+FLEX_meta <- FLEX8@meta.data
+
+# Calculate medians for each gene
+median_data_FLEX <- FLEX_meta %>%
+  group_by(GDO_comb) %>%
+  summarise(
+    median_pRPS6_measured = median(pRPS6_measured),
+    median_pRPS6_FLEX7 = median(pRPS6_ridge_GWPS),
+  )
+
+rownames(median_data_GWPS) <- median_data_GWPS$gene
+nt_med <- median_data_GWPS["non-targeting","median_pRPS6"]
+nt <- nt_med[[1]][1]
+median_data_GWPS$delta_pRPS6 <- median_data_GWPS$median_pRPS6 - nt
+
+rownames(median_data_FLEX) <- median_data_FLEX$GDO_comb
+nt_med <- median_data_FLEX["NO","median_pRPS6_measured"]
+nt <- nt_med[[1]][1]
+median_data_FLEX$delta_pRPS6 <- median_data_FLEX$median_pRPS6_measured - nt
+
+rownames(median_data_FLEX) <- median_data_FLEX$GDO_comb
+nt_med <- median_data_FLEX["NO","median_pRPS6_FLEX7"]
+nt <- nt_med[[1]][1]
+median_data_FLEX$delta_pRPS6_FLEX7 <- median_data_FLEX$median_pRPS6_FLEX7 - nt
+
+idents_df <- as.data.frame(table(Idents(FLEX8)))
+
+merged_df1 <- median_data_GWPS[, c("gene","delta_pRPS6","median_pRPS6")]
+colnames(merged_df1) <- c("Var1","delta_pRPS6_GWPS","median_pRPS6_GWPS")
+
+merged_df2 <- median_data_FLEX[, c("GDO_comb","delta_pRPS6","delta_pRPS6_FLEX7","median_pRPS6_measured","median_pRPS6_FLEX7")]
+colnames(merged_df2) <- c("Var1","delta_pRPS6_meas","delta_pRPS6_FLEX7","median_pRPS6_meas","median_pRPS6_FLEX7")
+
+merged_pool_3 <- merge(merged_df1,merged_df2, by = "Var1", all = FALSE)
+
+labels_show <- idents_df$Var1
+
+labels_to_show1 <- c("TSC1","DEPDC5","ITFG2","NO","RHEB","RPTOR","MTOR","MED12","MED19","NPRL2",
+                     "NPRL3","EFI2B5","TTI1","TELO2","LAMTOR3","LAMTOR2","XRN1","TAF8","SMC3","GFI1B","KDM1A")
+# Plot only the medians with repelling labels
+p8 <- ggplot(merged_pool_3, aes(x = median_pRPS6_FLEX7, y = median_pRPS6_meas)) +
+  # Add thicker zero lines
+  geom_hline(yintercept = 0, color = "grey", size = 1.2) +  # Thicker horizontal line
+  geom_vline(xintercept = 0, color = "grey", size = 1.2) + 
+  geom_point(color = "black", size = 3) +# Thicker vertical line# Plot median points
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  geom_text_repel(aes(label = ifelse(Var1 %in% labels_to_show1, Var1, NA)),
+                  color = "red", size = 4,
+                  box.padding = 0.5, max.overlaps = Inf
+  ) +
+  ylim(2.5,5) + xlim(2.5,4.5) +
+  labs(
+    title = "8 - Predicted vs. Measured - FLEX7 v FLEX8 - No MS -GWPS only - median",
+    x = "Delta Predicted pRPS6 FLEX7",
+    y = "Delta Measured pRPS6"
+  ) +
+  theme_minimal()
+
+png("plots/Fig5D_ScatterPredict.png",width = 3000, height = 1500,res=300)
+plot(p8)
+dev.off()
+```
