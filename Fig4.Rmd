@@ -248,7 +248,7 @@ p
 ```
 
 ```{r Fig4C, dpi=300, fig.width=10, fig.height=5, dev='png'}
-cluster profiler plot for bottom 100 genes using model cntribution score
+#cluster profiler plot for bottom 100 genes using model cntribution score
 
 library(clusterProfiler)
 library(enrichplot)
@@ -275,11 +275,6 @@ dotplot(ego, showCategory = 10)
 ```
 
 ```{r Fig4D, dpi=300, fig.width=10, fig.height=5, dev='png'}
-
-
-
-
-
 df <- as.data.frame(FetchData(Test, vars = c("pRPS6_measured", "pRPS6_ridge_10","pRPS6_ridge_30","pRPS6_ridge_50","pRPS6_ridge_100","pRPS6_ridge_500","pRPS6_ridge_1000","pRPS6_ridge_2000","pRPS6_Ridge")))
 model <- lm(df$pRPS6_measured ~ df$pRPS6_ridge_10, data = df)
 summary(model)
@@ -341,4 +336,165 @@ t.test(pRPS6_linear ~ gene, data = GWPS_mTOR_meta_RN)
 t.test(pRPS6_ridge ~ gene, data = GWPS_mTOR_meta_RN)
 
 plot(p1 + p2)
+```
+```{r Fig4F, dpi=300, fig.width=10, fig.height=5, dev='png'}
+GWPS_gloss <- readRDS("/brahms/blairj/FLEX/FLEX8/GWPS_gloss.rds")
+Glossary_pRPS6_md <- GWPS_gloss@meta.data     
+
+result_pRPS6 <- Glossary_pRPS6_md %>%
+  group_by(gene) %>%
+  summarise(median_pRPS6 = median(pRPS6_Ridge))
+
+result_pRPS6 <- result_pRPS6[order(result_pRPS6$median_pRPS6, decreasing = TRUE), ,drop=F]
+
+levels_pRPS6 <- result_pRPS6$gene
+
+# Reorder the factor levels for the x-axis
+Glossary_pRPS6_md$gene <- factor(Glossary_pRPS6_md$gene, levels = c(levels_pRPS6))
+
+
+# Get default ggplot2 palette for all levels
+library(scales)
+
+n_idents <- length(unique(Glossary_pRPS6_md$gene))
+
+default_cols <- hue_pal()(n_idents)
+
+# Name them after the factor levels
+names(default_cols) <- levels(Glossary_pRPS6_md$gene)
+
+# Override only NO-TARGET color
+default_cols["non-targeting"] <- "grey"
+
+p1 <- ggplot(Glossary_pRPS6_md, aes(x = gene, y = pRPS6_Ridge, fill = gene)) +
+  geom_boxplot() +
+  scale_fill_manual(values = default_cols) +
+  theme_minimal() +
+  ylim(2, 5.5) +
+  NoLegend() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+plot(p1)
+```
+
+```{r Fig4G, dpi=300, fig.width=10, fig.height=5, dev='png'}
+SIGNAL_Hela <- readRDS("/brahms/blairj/FLEX/FLEX7/SIGNAL_Hela_pred.rds")
+
+df <- SIGNAL_Hela@meta.data
+
+FeatureScatter(SIGNAL_Hela,"adt_pRPS6","pRPS6_ridge",group.by = "orig.ident", cols = "black")+
+  geom_smooth(method = "lm", color = "blue", se = TRUE) + NoLegend()
+
+model <- lm(df$pRPS6_measured ~ df$pRPS6_ridge, data = df)
+r2_value <- summary(model)$r.squared
+summary(model)
+```
+
+```{r Fig4H, dpi=300, fig.width=10, fig.height=5, dev='png'}
+# Load prediction object
+obj_TL_pred <- readRDS("/brahms/blairj/references/obj_TL_pred.rds")
+
+# Seurat matrices are genes x cells
+mTOR_rna <- GetAssayData(obj_TL_pred, assay = "RNA", layer = "data")
+gloss_rna <- GetAssayData(Glossary, assay = "RNA", layer = "data")
+
+# Genes to use in model/prediction
+common_genes <- Reduce(intersect, list(
+  rownames(mTOR_rna),
+  rownames(gloss_rna),
+  GWPS_genes
+))
+
+# Keep genes in same order in both matrices
+mTOR_rna <- mTOR_rna[common_genes, , drop = FALSE]
+gloss_rna <- gloss_rna[common_genes, , drop = FALSE]
+
+# Transpose once: cells x genes for glmnet
+x_train <- t(gloss_rna)
+x_pred  <- t(mTOR_rna)
+
+
+adt_data <- GetAssayData(Glossary, assay = "ADT", layer = "data")
+
+
+# Match response to training cells
+resp_pRPS6 <- as.numeric(adt_data["pRPS6", colnames(gloss_rna)])
+
+cv_ridge <- cv.glmnet(
+  x = x_train,
+  y = resp_pRPS6,
+  alpha = 0,
+  family = "gaussian",
+  type.measure = "mse",
+  nfolds = 10
+)
+
+best_lambda <- cv_ridge$lambda.min
+lambda_1se  <- cv_ridge$lambda.1se
+
+final_model_ridge <- glmnet(
+  x = x_train,
+  y = resp_pRPS6,
+  alpha = 0,
+  family = "gaussian",
+  lambda = best_lambda
+)
+
+model_genes <- colnames(x_train)
+
+# Check whether prediction matrix has all model genes
+missing_genes <- setdiff(model_genes, colnames(x_pred))
+extra_genes   <- setdiff(colnames(x_pred), model_genes)
+
+length(missing_genes)
+length(extra_genes)
+
+# Reorder/filter prediction matrix to match training matrix
+x_pred <- x_pred[, model_genes, drop = FALSE]
+
+predicted_pRPS6 <- predict(
+  final_model_ridge,
+  newx = x_pred,
+  type = "response"
+)
+
+
+predicted_pRPS6 <- as.numeric(predicted_pRPS6)
+names(predicted_pRPS6) <- rownames(x_pred)
+
+# Optional: add predictions to metadata
+obj_TL_pred$pRPS6_ridge_pred <- predicted_pRPS6[colnames(obj_TL_pred)]
+
+Idents(obj_TL_pred) <- "geno_time"
+
+###boxplots
+ObjTL_pRPS6_md <- obj_TL_pred@meta.data     
+ObjTL_pRPS6_md$ident <- ObjTL_pRPS6_md$geno_time
+
+# Reorder the factor levels for the x-axis
+ObjTL_pRPS6_md$ident <- factor(ObjTL_pRPS6_md$ident, levels = c("CTL_50","TSC2KO_50","CTL_120","TSC2KO_120","CTL_220","TSC2KO_220"))
+
+
+
+p1 <- ggplot(ObjTL_pRPS6_md, aes(x = ident, y = pRPS6_ridge_pred, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("CTL_50" = "grey", 
+                               "TSC2KO_50" = "red3", 
+                               "CTL_120"= "grey", 
+                               "TSC2KO_120" = "red3", 
+                               "CTL_220"= "grey",
+                               "TSC2KO_220" = "red3")) +
+  theme_minimal() + NoLegend() + theme(axis.title = element_blank()) + ylim(1.5,4)
+
+plot(p1)
+
+pairwise_results <- pairwise.t.test(
+  x = ObjTL_pRPS6_md$pRPS6_ridge,
+  g = ObjTL_pRPS6_md$ident,
+  p.adjust.method = "BH",
+  pool.sd = FALSE
+)
+
+pairwise_results
 ```
