@@ -34,6 +34,29 @@ The first steps for this part are to model. In the section below is the code use
 
 ```{r Modeling}
 
+#The GWPS mTOR dataset in zenodo has its geens converted already, but below is the function used to convert the ensembl genes from the GWPS data to gene symbols as in the flex datasets and then subsetting it to using only the genes that are present in the flex dataset and creating a new seurat object
+library(org.Hs.eg.db)
+convert_genes <- function(names,from='ENSEMBL',
+                          to='SYMBOL') {
+  mapIds(org.Hs.eg.db,names,column=to,keytype=from)
+}
+
+
+flex_genes <- rownames(
+  GetAssayData(Validation, assay = "RNA", layer = "data")
+)
+
+genex_mat <- GWPS@assays$RNA@counts
+genex_row <- rownames(genex_mat)
+genex_symb <- convert_genes2(genex_row)
+rownames(genex_mat) <- genex_symb
+genex_mat <- genex_mat[!is.na(rownames(genex_mat)), ]
+combined_mat <- rowsum(genex_mat, group = rownames(genex_mat))
+mat_subset <- combined_mat[rownames(combined_mat) %in% flex_genes, ]
+
+GWPS_GS <- CreateSeuratObject(counts = mat_subset)
+
+
 #### OLS model using Glossary Data and Applying to "Test" dataset
 ### First load in "Glossary", "Test" and "GWPS_mTOR" datasets
 rna.mtx <- GetAssayData(Glossary,assay = "RNA",layer = "data")
