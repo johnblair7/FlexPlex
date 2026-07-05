@@ -19,15 +19,15 @@ library(cowplot)
 options(future.globals.maxSize = 10 * 1024^3)
 ```
 
-First, start by loading in the object 
+First, start by loading in the object - available from zenodo
 
 ```{r Load in Object}
-pilot_all <- readRDS("/brahms/blairj/FLEX/FLEX8/pilot_prefilt.rds")
+pilot_all <- readRDS("pilot.rds")
 ```
 
 Figures 1A,B,C all illustrator files
 
-
+Guide exclusivity scatter plots
 ```{r Fig1D, dpi=300, fig.width=5, fig.height=10, dev='png'}
 Idents(pilot_all) <- "HTO_classification.global"
 guides_sub <- subset(pilot_all,idents = c("TSX1","TSX2","TSX3"))
@@ -56,7 +56,7 @@ p2 <- FeatureScatter(tsc_guide_sub,"TSC1-1","RPTOR-1") + NoLegend()
 
 plot_grid(p1,p2,ncol =1)
 ```
-
+HTO exclusivity plots
 ```{r Fig1E, dpi=300, fig.width=15, fig.height=5, dev='png'}
 pilot_all <- MULTIseqDemux(pilot_all,assay = "HTO")
 levels(pilot_all) <- c("TSX1","TSX2","TSX3","Doublet","Negative")
@@ -69,6 +69,8 @@ p2 <- FeatureScatter(pilot_all,"TSX1","TSX3",slot = "counts") + NoLegend() + ggt
 plot_grid(p1,p2,p3,ncol = 3)
 ```
 
+
+CD55 RNA knockdown across CD55 perturbed cells
 ```{r Fig1F, dpi=300, fig.width=15, fig.height=5, dev='png'}
 Idents(guides_sub) <- "GDO3_classification.global"
 cd55 <- AggregateExpression(guides_sub,assays = "RNA",return.seurat = T)
@@ -91,6 +93,8 @@ p1 <- ggplot(avg_exp, aes(x = NT, y = CD55)) +
 
 plot(p1)
 ```
+
+CD55 protein knockdown across 3 CD55 guides
 ```{r Fig1G, dpi=300, fig.width=15, fig.height=5, dev='png'}
 Idents(guides_sub) <- "GDO_classification.global"
 cd55_sub <- subset(guides_sub,idents = c("NT-1","NT-2","NT-3","CD55-1","CD55-2","CD55-3"))
@@ -118,6 +122,8 @@ p1 <- ggplot(cd55_sub_CD55, aes(x = ident, y = CD55, fill = ident)) +
   theme_minimal() + NoLegend()
 plot(p1)
 ```
+
+Heatmap of TSC1 vs NT
 ```{r Fig1H, dpi=300, fig.width=15, fig.height=5, dev='png'}
 Idents(guides_sub) <- "GDO3_classification.global"
 fc.name = "avg_log2FC"

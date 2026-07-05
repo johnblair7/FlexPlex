@@ -26,9 +26,10 @@ options(future.globals.maxSize = 10 * 1024^3)
 
 Figures 3A  illustrator files
 
+This is a boxplot showing the pRPS6 levels from the glossary dataset available on Zenodo
 
 ```{r Fig3B, dpi=300, fig.width=10, fig.height=10, dev='png'}
-Glossary <- readRDS("/brahms/blairj/FLEX/FLEX8/Glossary.rds")
+Glossary <- readRDS("Glossary.rds")
 Glossary_pRPS6 <- GetAssayData(Glossary,assay = "ADT")
 Glossary_pRPS6 <- as.data.frame(Glossary_pRPS6)
 Glossary_pRPS6 <- as.data.frame(t(Glossary_pRPS6))
@@ -147,6 +148,7 @@ make_QC_heatmap <- function(seurat_obj, group.by=NULL, cells.order=NULL, n_downs
 }
 ```
 
+Makes heatmap for a subset of the perturbations in the glossay dataset
 
 ```{r Fig3C, dpi=300, fig.width=10, fig.height=10, dev='png'}
 sub <- subset(Glossary,idents = c("TSC2","TSC1","MAP4K5","ACTR8","NO-TARGET","YLPM1","RPTOR","DENND5B","TTI2","GFI1B","DHDDS","SUGT1"))
@@ -163,9 +165,259 @@ g1 <- make_QC_heatmap(sub1,return.genes = TRUE)
 p1b <- make_QC_heatmap(sub1,genes_to_plot = c(g1$gene,"pRPS6"))
 plot(p1b)
 ```
+The same as above but for the down-regulated genes
 
 ```{r Fig3D, dpi=300, fig.width=10, fig.height=10, dev='png'}
 g2 <- make_QC_heatmap(sub1,return.genes = TRUE,pos.markers = FALSE)
 p2b <- make_QC_heatmap(sub1,genes_to_plot = c(g2$gene,"pRPS6"),pos.markers = FALSE)
 plot(p2b)
+```
+
+Boxplots on a guide level for a subset of perturbations in the glossary dataset 
+
+```{r Fig3D, dpi=300, fig.width=10, fig.height=10, dev='png'}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(cowplot)
+
+
+#------------------------------------------------------------
+# Safely run a t-test
+#------------------------------------------------------------
+
+safe_t_test <- function(x, y) {
+  
+  x <- x[is.finite(x)]
+  y <- y[is.finite(y)]
+  
+  if (length(x) < 2 || length(y) < 2) {
+    return(NA_real_)
+  }
+  
+  t.test(x, y)$p.value
+}
+
+
+#------------------------------------------------------------
+# Compare each group to a control
+#------------------------------------------------------------
+
+compare_to_control <- function(
+    df,
+    value_col,
+    control_ident
+) {
+  
+  control_vals <- df %>%
+    filter(ident == control_ident) %>%
+    pull(all_of(value_col))
+  
+  mean_control <- mean(control_vals, na.rm = TRUE)
+  
+  df %>%
+    filter(ident != control_ident) %>%
+    group_by(ident) %>%
+    summarise(
+      n = sum(is.finite(.data[[value_col]])),
+      mean_group = mean(.data[[value_col]], na.rm = TRUE),
+      p_value = safe_t_test(
+        .data[[value_col]],
+        control_vals
+      ),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      control = control_ident,
+      mean_control = mean_control,
+      log2FC = if_else(
+        mean_group > 0 & mean_control > 0,
+        log2(mean_group / mean_control),
+        NA_real_
+      ),
+      percent_change = (
+        mean_group / mean_control - 1
+      ) * 100,
+      p_adj = p.adjust(
+        p_value,
+        method = "BH"
+      )
+    )
+}
+
+
+#------------------------------------------------------------
+# Make boxplot
+#------------------------------------------------------------
+
+make_boxplot <- function(
+    df,
+    value_col,
+    fill_values,
+    y_label
+) {
+  
+  ggplot(
+    df,
+    aes(
+      x = ident,
+      y = .data[[value_col]],
+      fill = ident
+    )
+  ) +
+    geom_boxplot() +
+    scale_fill_manual(
+      values = fill_values,
+      drop = FALSE
+    ) +
+    labs(
+      x = NULL,
+      y = y_label
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "none",
+      axis.text.x = element_text(
+        angle = 45,
+        hjust = 1
+      )
+    )
+}
+
+
+#------------------------------------------------------------
+# Run guide validation
+#------------------------------------------------------------
+
+run_guide_validation <- function(
+    object,
+    target_gene,
+    guides,
+    target_color,
+    control_ident = "NO-TARGET-8",
+    layer = "data"
+) {
+  
+  groups <- c(
+    "NO-TARGET-3",
+    "NO-TARGET-8",
+    guides
+  )
+  
+  # Pull only the required expression + metadata
+  df <- FetchData(
+    object = object,
+    vars = c(
+      target_gene,
+      "pRPS6_measured",
+      "GDO_classification.global"
+    ),
+    assay = "RNA",
+    layer = layer,
+    clean = FALSE
+  ) %>%
+    transmute(
+      ident = GDO_classification.global,
+      target_expression = .data[[target_gene]],
+      pRPS6 = pRPS6_measured
+    ) %>%
+    filter(ident %in% groups) %>%
+    mutate(
+      ident = factor(
+        ident,
+        levels = groups
+      )
+    )
+  
+  # Plot colors
+  fill_values <- setNames(
+    c(
+      "grey",
+      "grey",
+      rep(target_color, length(guides))
+    ),
+    groups
+  )
+  
+  # Target gene expression
+  p_target <- make_boxplot(
+    df = df,
+    value_col = "target_expression",
+    fill_values = fill_values,
+    y_label = target_gene
+  )
+  
+  # pRPS6
+  p_pRPS6 <- make_boxplot(
+    df = df,
+    value_col = "pRPS6",
+    fill_values = fill_values,
+    y_label = "pRPS6"
+  )
+  
+  # Combined plot
+  combined_plot <- plot_grid(
+    p_target,
+    p_pRPS6
+  )
+  
+  # Statistics
+  target_stats <- compare_to_control(
+    df = df,
+    value_col = "target_expression",
+    control_ident = control_ident
+  ) %>%
+    mutate(measurement = target_gene)
+  
+  pRPS6_stats <- compare_to_control(
+    df = df,
+    value_col = "pRPS6",
+    control_ident = control_ident
+  ) %>%
+    mutate(measurement = "pRPS6")
+  
+  list(
+    data = df,
+    plot = combined_plot,
+    target_stats = target_stats,
+    pRPS6_stats = pRPS6_stats,
+    stats = bind_rows(
+      target_stats,
+      pRPS6_stats
+    )
+  )
+}
+
+GFI1B_results <- run_guide_validation(
+  object = Glossary,
+  target_gene = "GFI1B",
+  guides = c("GFI1B-2", "GFI1B-4"),
+  target_color = "#619CFF"
+)
+
+p3 <- GFI1B_results$plot
+
+TTI2_results <- run_guide_validation(
+  object = Glossary,
+  target_gene = "TTI2",
+  guides = c("TTI2-0", "TTI2-4"),
+  target_color = "red3"
+)
+
+p2 <- TTI2_results$plot
+
+RPTOR_results <- run_guide_validation(
+  object = Glossary,
+  target_gene = "RPTOR",
+  guides = c("RPTOR-2", "RPTOR-5"),
+  target_color = "#00BA38"
+)
+
+p1 <- RPTOR_results$plot
+
+GFI1B_results$stats
+TTI2_results$stats
+RPTOR_results$stats
+
+plot_grid(p1,p2,p3)
 ```

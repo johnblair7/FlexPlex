@@ -28,6 +28,9 @@ options(future.globals.maxSize = 10 * 1024^3)
 ```
 
 
+
+Here is where we use k-means clustering from a subset of genes on a subset of perturbations to illustrate the related biological processes
+
 ``` {r Fig6A, dpi=300, fig.width=10, fig.height=5, dev='png'}
 ####### Finding the input genes
 Idents(FLEX8) <- "GDO_comb"
@@ -185,6 +188,8 @@ plot(p4)
 plot(p5)
 ```
 
+Now demonstrating the subset of genes that represent mTORC1 activaiton, repression and feedback
+
 ``` {r Fig6B, dpi=300, fig.width=10, fig.height=5, dev='png'}
 Idents(Validation) <- "GDO_comb"
 sub <- subset(Validation,idents = c("MTOR","RPTOR","RHEB","LAMTOR3","LAMTOR2","RRAGA","RRAGC","TSC1","DEPDC5","NPRL2","NPRL3"))
@@ -286,6 +291,8 @@ pairwise_table
 
 ```
 
+Exploring the dynamics of the cell cycle on the biology
+
 ``` {r Fig6D, dpi=300, fig.width=10, fig.height=5, dev='png'}
 s.genes <- cc.genes.updated.2019$s.genes
 g2m.genes <- cc.genes.updated.2019$g2m.genes
@@ -322,10 +329,106 @@ ggplot(summary, aes(x = Cluster6, y = G2M_proportion)) +
 
 ```
 
+
+``` {r FigS6A, dpi=300, fig.width=10, fig.height=5, dev='png'}
+DimPlot(Validation,group.by = "Phase")
+```
+
+``` {r FigS6B, dpi=300, fig.width=10, fig.height=5, dev='png'}
+Validation_metadata <- Validation@meta.data
+
+data_subset <- Validation_metadata %>%
+  filter(GDO_comb %in% c("AARS","NARS","MED12","MED19","MED30","NO","ASCC3","GPN3","PSMD4","MED12","MED19","MED30","TSC1","DEPDC5","NPRL2","NPRL3","MTOR","RPTOR","NO","EEF1G","EIF2B3","EIF2B5","EIF3H","EIF3D","TTI1","KDM1A","GFI1B","RACK1")) %>%
+  count(GDO_comb, Phase, name = "n") %>%
+  group_by(GDO_comb) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup()
+
+
+p1 <- ggplot(data_subset, aes(x = GDO_comb, y = prop, fill = Phase)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = c("G1" = "#F8766D", "S" = "#619CFF", "G2M" = "#00BA38")) +
+  labs(title = "Stacked Proportional Barplot",
+       x = "Ident",
+       y = "Proportion",
+       fill = "Phase") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),axis.title = element_blank()) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+plot(p1)
+```
+
+``` {r FigS6C, dpi=300, fig.width=10, fig.height=5, dev='png'}
+cell_cycsub <- subset(Validation,idents = c("GFI1B","KDM1A","MED12","MED19","MED30","TSC1","DEPDC5","NPRL2","NPRL3","MTOR","RPTOR","NO","EEF1G","EIF2B3","EIF2B5","EIF3D","LAMTOR3","LAMTOR2","RRAGA","RRAGC","HSPE1","AARS","NARS"))
+
+cell_cycsub_md <- cell_cycsub@meta.data     
+cell_cycsub_md$ident <- cell_cycsub_md$GDO_comb
+
+# Reorder the factor levels for the x-axis
+cell_cycsub_md$ident <- factor(cell_cycsub_md$ident, levels = c("TSC1","DEPDC5","NPRL3","NPRL2","HSPE1","NO","KDM1A","EIF3D","EIF2B3","NARS","EIF2B5","EEF1G","GFI1B","MED19","RRAGA","AARS","LAMTOR2","RRAGC","MED30","MED12","LAMTOR3","MTOR","RPTOR"))
+
+Idents(cell_cycsub) <- "Phase"
+G1_ccsub <- subset(cell_cycsub, idents = "G1")
+G2S_ccsub <- subset(cell_cycsub, idents = c("S","G2M"))
+
+G1_ccsub_md <- G1_ccsub@meta.data     
+G1_ccsub_md$ident <- G1_ccsub_md$GDO_comb
+
+# Reorder the factor levels for the x-axis
+G1_ccsub_md$ident <- factor(G1_ccsub_md$ident, levels = c("TSC1","DEPDC5","NPRL3","NPRL2","HSPE1","NO","KDM1A","EIF3D","EIF2B3","NARS","EIF2B5","EEF1G","GFI1B","MED19","RRAGA","AARS","LAMTOR2","RRAGC","MED30","MED12","LAMTOR3","MTOR","RPTOR"))
+
+# Get default ggplot2 palette for all levels
+default_cols <- scale_fill_discrete()$palette(length(unique(G1_ccsub_md$ident)))
+
+# Name them after the factor levels
+names(default_cols) <- levels(G1_ccsub_md$ident)
+
+# Override only NO-TARGET color
+default_cols["NO"] <- "grey"
+
+# Apply
+p1 <- ggplot(G1_ccsub_md, aes(x = ident, y = pRPS6_measured, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = cols) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank())
+
+plot(p1)
+```
+
+``` {r FigS6Cb, dpi=300, fig.width=10, fig.height=5, dev='png'}
+G2S_ccsub_md <- G2S_ccsub@meta.data     
+G2S_ccsub_md$ident <- G2S_ccsub_md$GDO_comb
+
+# Reorder the factor levels for the x-axis
+G2S_ccsub_md$ident <- factor(G2S_ccsub_md$ident, levels = c("TSC1","DEPDC5","NPRL3","NPRL2","HSPE1","NO","KDM1A","EIF3D","EIF2B3","NARS","EIF2B5","EEF1G","GFI1B","MED19","RRAGA","AARS","LAMTOR2","RRAGC","MED30","MED12","LAMTOR3","MTOR","RPTOR"))
+
+# Get default ggplot2 palette for all levels
+default_cols <- scale_fill_discrete()$palette(length(unique(G2S_ccsub_md$ident)))
+
+# Name them after the factor levels
+names(default_cols) <- levels(G2S_ccsub_md$ident)
+
+# Override only NO-TARGET color
+default_cols["NO"] <- "grey"
+
+# Apply
+p2 <- ggplot(G2S_ccsub_md, aes(x = ident, y = pRPS6_measured, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = cols) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_blank())
+
+plot(p2)
+```
+
 ``` {r Fig6E, dpi=300, fig.width=10, fig.height=5, dev='png'}
-
-
-
 data_subset <- subset(df,GDO_comb %in% c("MED12","MED19","MED30","PSMD4","ASCC3","GPN3","NO"))
 
 p1 <- ggplot(data_subset, aes(x = GDO_comb, y = prop, fill = Phase)) +
@@ -345,26 +448,6 @@ p1 <- ggplot(data_subset, aes(x = GDO_comb, y = prop, fill = Phase)) +
 plot(p1)
 ```
 
-
-``` {r FigS6B, dpi=300, fig.width=10, fig.height=5, dev='png'}
-data_subset <- subset(df,GDO_comb %in% c("AARS","NARS","MED12","MED19","MED30","NO","NO","ASCC3","GPN3","PSMD4","MED12","MED19","MED30","TSC1","DEPDC5","NPRL2","NPRL3","MTOR","RPTOR","NO","EEF1G","EIF2B3","EIF2B5","EIF3H","EIF3D","TTI1","KDM1A","GFI1B","RACK1"))
-
-p1 <- ggplot(data_subset, aes(x = GDO_comb, y = prop, fill = Phase)) +
-  geom_bar(stat = "identity", position = "fill") +
-  scale_fill_manual(values = c("G1" = "#F8766D", "S" = "#619CFF", "G2M" = "#00BA38")) +
-  labs(title = "Stacked Proportional Barplot",
-       x = "Ident",
-       y = "Proportion",
-       fill = "Phase") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),axis.title = element_blank()) +
-  theme(
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank()
-  )
-
-plot(p1)
-```
 
 ``` {r Fig6F, dpi=300, fig.width=10, fig.height=5, dev='png'}
 Idents(Validation) <- "Phase"
@@ -431,6 +514,8 @@ p3 <- ggplot(G2M_sub_F_pRPS6, aes(x = ident, y = pRPS6, fill = ident)) +
 plot_grid(p1,p2,p3,ncol =3)
 ```
 
+plotting the qPCR data using the values from extended data
+
 ``` {r Fig6G, dpi=300, fig.width=10, fig.height=5, dev='png'}
 qPCR_results <- read_csv("/brahms/blairj/FLEX/FLEX8/qPCR_results_box.csv")
 p1 <- ggplot(qPCR_results, aes(x = Targ_Treat, y = sXBP1_tXBP1, fill = Target)) +
@@ -458,6 +543,8 @@ DHDDS_C_p <- t.test(
   data = subset(qPCR_results, Targ_Treat %in% c("DHDDS_C", "NT_C"))
 )
 ```
+
+Plotting the western blot data using the values from extended data
 
 ``` {r Fig6I, dpi=300, fig.width=10, fig.height=5, dev='png'}
 # Create data frame
@@ -566,4 +653,417 @@ p3 <- ggplot(df_long, aes(x = Condition, y = Value)) +
 
 
 plot_grid(p1,p2,p3,ncol =1)
+```
+
+```{r FigS6D, dpi=300, fig.width=10, fig.height=5, dev='png'}
+#GWPS data
+data_subset <- GWPS_metadata %>%
+  filter(gene %in% c("TSC1", "non-targeting", "RPTOR", "MED12")) %>%
+  count(gene, Phase, name = "n") %>%
+  group_by(gene) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup()
+
+
+p1 <- ggplot(data_subset, aes(x = gene, y = prop, fill = Phase)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = c("G1" = "#F8766D", "S" = "#619CFF", "G2M" = "#00BA38")) +
+  labs(title = "Stacked Proportional Barplot",
+       x = "Ident",
+       y = "Proportion",
+       fill = "Phase") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),axis.title = element_blank()) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+
+#uses the cell cycle percentrage data from FigS7
+data_subset <- read_csv("CellCycle_dfsubset.csv")
+order_vec <- c("TSC1","NO-TARGET", "RPTOR", "MED12")
+data_subset$Var1 <- factor(data_subset$Var1, levels = order_vec)
+
+p2 <- ggplot(data_subset, aes(x = Var1, y = Percentage, fill = Var2)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = c("G1" = "#F8766D", "S" = "#619CFF", "G2M" = "#00BA38")) +
+  labs(title = "Stacked Proportional Barplot",
+       x = "Ident",
+       y = "Proportion",
+       fill = "Phase") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),axis.title = element_blank()) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+
+plot_grid(p1,p2)
+```
+
+
+```{r FigS6E, dpi=300, fig.width=10, fig.height=5, dev='png'}
+pRPS6_G1 <- read_csv("pRPS6_G1.csv")
+
+df_long <- pivot_longer(pRPS6_G1,
+                        cols = everything(),
+                        names_to = "Gene",
+                        values_to = "Value")
+
+df_long$log_value <- log10(df_long$Value + 1)
+
+df_long$Gene <- factor(
+  df_long$Gene,
+  levels = c("TSC1","NT","RPTOR","MED12")
+)
+
+p1 <- ggplot(df_long, aes(x = Gene, y = log_value, fill = Gene)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c(
+    "NT" = "grey70",
+    "MED12" = "#F8766D",
+    "RPTOR" = "#F8766D",
+    "TSC1" = "#F8766D"
+  )) + 
+  theme_classic() + 
+  coord_cartesian(ylim = c(2.6,2.9)) + theme(legend.position = "none")
+
+t.test(pRPS6_G1$NT,pRPS6_G1$MED12)
+t.test(pRPS6_G1$NT,pRPS6_G1$RPTOR)
+t.test(pRPS6_G1$NT,pRPS6_G1$TSC1)
+
+
+#######
+pRPS6_G2M <- read_csv("pRPS6_G2M.csv")
+
+df_long <- pivot_longer(pRPS6_G2M,
+                        cols = everything(),
+                        names_to = "Gene",
+                        values_to = "Value")
+
+df_long$log_value <- log10(df_long$Value + 1)
+
+df_long$Gene <- factor(
+  df_long$Gene,
+  levels = c("TSC1","NT","RPTOR","MED12")
+)
+
+p2 <- ggplot(df_long, aes(x = Gene, y = log_value, fill = Gene)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c(
+    "NT" = "grey70",
+    "MED12" = "#00BA38",
+    "RPTOR" = "#00BA38",
+    "TSC1" = "#00BA38"
+  )) + 
+  theme_classic() + 
+  coord_cartesian(ylim = c(2.6,2.9)) + theme(legend.position = "none")
+
+t.test(pRPS6_G2M$NT,pRPS6_G2M$MED12)
+t.test(pRPS6_G2M$NT,pRPS6_G2M$RPTOR)
+t.test(pRPS6_G2M$NT,pRPS6_G2M$TSC1)
+
+
+
+#######
+pRPS6_S <- read_csv("pRPS6_S.csv")
+
+df_long <- pivot_longer(pRPS6_S,
+                        cols = everything(),
+                        names_to = "Gene",
+                        values_to = "Value")
+
+df_long$log_value <- log10(df_long$Value + 1)
+
+df_long$Gene <- factor(
+  df_long$Gene,
+  levels = c("TSC1","NT","RPTOR","MED12")
+)
+
+p3 <- ggplot(df_long, aes(x = Gene, y = log_value, fill = Gene)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c(
+    "NT" = "grey70",
+    "MED12" = "#619CFF",
+    "RPTOR" = "#619CFF",
+    "TSC1" = "#619CFF"
+  )) + 
+  theme_classic() + 
+  coord_cartesian(ylim = c(2.6,2.9)) + theme(legend.position = "none")
+
+t.test(pRPS6_S$NT,pRPS6_S$MED12)
+t.test(pRPS6_S$NT,pRPS6_S$RPTOR)
+t.test(pRPS6_S$NT,pRPS6_S$TSC1)
+
+plot_grid(p1,p3,p2,ncol =3)
+```
+
+Checking out RNA changes in a subset of perturbations in different clusters
+
+``` {r FigS6F, dpi=300, fig.width=10, fig.height=5, dev='png'}
+f8_PPP <- subset(Validation,idents = c("PSMD4","ASCC3","GPN3","NO"))
+f8_PPP_rna <- GetAssayData(f8_PPP,assay = "RNA")
+f8_PPP_rna <- as.data.frame(f8_PPP_rna)
+f8_PPP_rna <- as.data.frame(t(f8_PPP_rna))
+f8_PPP_rna_md <- f8_PPP@meta.data     
+f8_PPP_rna$ident <- f8_PPP_rna_md$GDO_comb
+
+# Reorder the factor levels for the x-axis
+f8_PPP_rna$ident <- factor(f8_PPP_rna$ident, levels = c("ASCC3","GPN3","PSMD4","NO"))
+
+# Get default ggplot2 palette for all levels
+default_cols <- scale_fill_discrete()$palette(length(unique(f8_PPP_rna$ident)))
+
+# Name them after the factor levels
+names(default_cols) <- levels(f8_PPP_rna$ident)
+
+# Override only NO-TARGET color
+default_cols["NO"] <- "grey"
+
+p1 <- ggplot(f8_PPP_rna, aes(x = ident, y = DDIT3, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = default_cols) +
+  theme_minimal() +
+  NoLegend() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+p2 <- ggplot(f8_PPP_rna, aes(x = ident, y = PPP1R15A, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = default_cols) +
+  theme_minimal() +
+  NoLegend() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+png("plots/FigS6G_PPP_rna_BoxPlot_.png",width = 2400, height = 4000,res=600)
+plot_grid(p1,p2,ncol =1)
+dev.off()
+
+
+control_vals <- f8_PPP_rna$DDIT3[f8_UPR_rna$ident == "NO"]
+mean_control <- mean(control_vals)
+results <- f8_PPP_rna %>%
+  filter(ident != "NO") %>%
+  group_by(ident) %>%
+  summarise(
+    mean_group = mean(DDIT3),
+    log2FC = log2(mean_group / mean_control),
+    percent_change = (2^log2FC - 1) * 100,
+    p_value = t.test(DDIT3, control_vals)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))
+
+results
+
+control_vals <- f8_PPP_rna$PPP1R15A[f8_PPP_rna$ident == "NO"]
+mean_control <- mean(control_vals)
+results <- f8_PPP_rna %>%
+  filter(ident != "NO") %>%
+  group_by(ident) %>%
+  summarise(
+    mean_group = mean(PPP1R15A),
+    log2FC = log2(mean_group / mean_control),
+    percent_change = (2^log2FC - 1) * 100,
+    p_value = t.test(PPP1R15A, control_vals)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))
+
+results
+```
+
+``` {r FigS6G, dpi=300, fig.width=10, fig.height=5, dev='png'}
+f8_UPR <- subset(Validation,idents = c("PPA1","SRP72","XRCC6","NO"))
+f8_UPR_rna <- GetAssayData(f8_UPR,assay = "RNA",slot = "data")
+f8_UPR_rna <- as.data.frame(f8_UPR_rna)
+f8_UPR_rna <- as.data.frame(t(f8_UPR_rna))
+f8_UPR_rna_md <- f8_UPR@meta.data     
+f8_UPR_rna$ident <- f8_UPR_rna_md$GDO_comb
+
+# Reorder the factor levels for the x-axis
+f8_UPR_rna$ident <- factor(f8_UPR_rna$ident, levels = c("PPA1","SRP72","XRCC6","NO"))
+
+# Get default ggplot2 palette for all levels
+default_cols <- scale_fill_discrete()$palette(length(unique(f8_UPR_rna$ident)))
+
+# Name them after the factor levels
+names(default_cols) <- levels(f8_UPR_rna$ident)
+
+# Override only NO-TARGET color
+default_cols["NO"] <- "grey"
+
+p1 <- ggplot(f8_UPR_rna, aes(x = ident, y = SSR2, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = default_cols) +
+  theme_minimal() +
+  NoLegend() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+p2 <- ggplot(f8_UPR_rna, aes(x = ident, y = SEC61A1, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = default_cols) +
+  theme_minimal() +
+  NoLegend() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+plot_grid(p1,p2,ncol =1)
+
+control_vals <- f8_UPR_rna$SSR2[f8_UPR_rna$ident == "NO"]
+mean_control <- mean(control_vals)
+results <- f8_UPR_rna %>%
+  filter(ident != "NO") %>%
+  group_by(ident) %>%
+  summarise(
+    mean_group = mean(SSR2),
+    log2FC = log2(mean_group / mean_control),
+    percent_change = (2^log2FC - 1) * 100,
+    p_value = t.test(SSR2, control_vals)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))
+
+results
+
+control_vals <- f8_UPR_rna$SEC61A1[f8_UPR_rna$ident == "NO"]
+mean_control <- mean(control_vals)
+results <- f8_UPR_rna %>%
+  filter(ident != "NO") %>%
+  group_by(ident) %>%
+  summarise(
+    mean_group = mean(SEC61A1),
+    log2FC = log2(mean_group / mean_control),
+    percent_change = (2^log2FC - 1) * 100,
+    p_value = t.test(SEC61A1, control_vals)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))
+
+results
+```
+
+``` {r FigS6H, dpi=300, fig.width=10, fig.height=5, dev='png'}
+Idents(Validation) <- "GDO_comb"
+sub2 <- subset(Validation, idents = c("EIF2B3","EIF2B5","AARS","EEF1G","NARS","NARS","NO"))
+
+sub2_rna <- GetAssayData(sub2,assay = "RNA")
+sub2_rna <- as.data.frame(sub2_rna)
+sub2_rna <- as.data.frame(t(sub2_rna))
+sub2_md <- sub2@meta.data     
+sub2_rna$ident <- sub2_md$GDO_comb
+
+# Reorder the factor levels for the x-axis
+sub2_rna$ident <- factor(sub2_rna$ident, levels = c("NO","NARS","AARS","EEF1G","EIF2B3","EIF2B5"))
+
+# Get default ggplot2 palette for all levels
+default_cols <- scale_fill_discrete()$palette(length(unique(sub2_rna$ident)))
+
+# Name them after the factor levels
+names(default_cols) <- levels(sub2_rna$ident)
+
+# Override only NO-TARGET color
+default_cols["NO"] <- "grey"
+
+p1 <- ggplot(sub2_rna, aes(x = ident, y = PHGDH, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = default_cols) +
+  theme_minimal() +
+  NoLegend() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+p2 <- ggplot(sub2_rna, aes(x = ident, y = EIF1, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = default_cols) +
+  theme_minimal() +
+  NoLegend() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+
+control_vals <- sub2_rna$SESN2[sub2_rna$ident == "NO"]
+mean_control <- mean(control_vals)
+results <- sub2_rna %>%
+  filter(ident != "NO") %>%
+  group_by(ident) %>%
+  summarise(
+    mean_group = mean(SESN2),
+    log2FC = log2(mean_group / mean_control),
+    percent_change = (2^log2FC - 1) * 100,
+    p_value = t.test(SESN2, control_vals)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))
+
+results
+
+control_vals <- sub2_rna$DDIT4[sub2_rna$ident == "NO"]
+mean_control <- mean(control_vals)
+results <- sub2_rna %>%
+  filter(ident != "NO") %>%
+  group_by(ident) %>%
+  summarise(
+    mean_group = mean(DDIT4),
+    log2FC = log2(mean_group / mean_control),
+    percent_change = (2^log2FC - 1) * 100,
+    p_value = t.test(DDIT4, control_vals)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))
+
+results
+
+plot_grid(p1,p2)
+```
+
+``` {r FigS6I, dpi=300, fig.width=10, fig.height=5, dev='png'}
+sub2_pRPS6 <- GetAssayData(sub2,assay = "ADT")
+sub2_pRPS6 <- as.data.frame(sub2_pRPS6)
+sub2_pRPS6 <- as.data.frame(t(sub2_pRPS6))
+sub2_md <- sub2@meta.data     
+sub2_pRPS6$ident <- sub2_md$GDO_comb
+
+# Reorder the factor levels for the x-axis
+sub2_pRPS6$ident <- factor(sub2_pRPS6$ident, levels = c("NO","NARS","AARS","EEF1G","EIF2B3","EIF2B5"))
+
+# Get default ggplot2 palette for all levels
+default_cols <- scale_fill_discrete()$palette(length(unique(sub2_pRPS6$ident)))
+
+# Name them after the factor levels
+names(default_cols) <- levels(sub2_pRPS6$ident)
+
+# Override only NO-TARGET color
+default_cols["NO"] <- "grey"
+
+p1 <- ggplot(sub2_pRPS6, aes(x = ident, y = pRPS6, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = default_cols) +
+  theme_minimal() +
+  ylim(2, 5.5) +
+  NoLegend() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+control_vals <- sub2_pRPS6$pRPS6[sub2_pRPS6$ident == "NO"]
+mean_control <- mean(control_vals)
+results <- sub2_pRPS6 %>%
+  filter(ident != "NO") %>%
+  group_by(ident) %>%
+  summarise(
+    mean_group = mean(pRPS6),
+    log2FC = log2(mean_group / mean_control),
+    percent_change = (2^log2FC - 1) * 100,
+    p_value = t.test(pRPS6, control_vals)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))
+
+results
+
+plot(p1)
 ```

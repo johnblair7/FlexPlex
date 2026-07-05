@@ -116,6 +116,123 @@ p2 <- ggplot(red_genes_data, aes(x = bin)) +
 plot(p2)
 ```
 
+To cluster the genes for validation selection, we ran mixscape and LDA on the bottom 200 and top 50 perturbations
+
+```{r FigS5A, dpi=300, fig.width=10, fig.height=5, dev='png'}
+DefaultAssay(object = GWPS_ridge) <- 'RNA'
+GWPS_ridge <- NormalizeData(object = GWPS_ridge) %>% FindVariableFeatures() %>% ScaleData()
+
+# Run Principle Component Analysis (PCA) to reduce the dimensionality of the data.
+GWPS_ridge <- RunPCA(object = GWPS_ridge)
+
+# Run Uniform Manifold Approximation and Projection (UMAP) to visualize clustering in 2-D.
+GWPS_ridge <- RunUMAP(object = GWPS_ridge, dims = 1:40)
+
+Idents(GWPS_ridge) <- "GDO_comb"
+
+# Calculate perturbation signature (PRTB).
+GWPS_ridge<- CalcPerturbSig(
+  object = GWPS_ridge, 
+  assay = "RNA", 
+  slot = "data", 
+  gd.class ="gene", 
+  nt.cell.class = "non-targeting", 
+  reduction = "pca", 
+  ndims = 40, 
+  num.neighbors = 20, 
+  new.assay.name = "PRTB")
+
+# Prepare PRTB assay for dimensionality reduction: 
+# Normalize data, find variable features and center data.
+DefaultAssay(object = GWPS_ridge) <- 'PRTB'
+
+# Use variable features from RNA assay.
+VariableFeatures(object = GWPS_ridge) <- VariableFeatures(object = GWPS_ridge[["RNA"]])
+GWPS_ridge <- ScaleData(object = GWPS_ridge, do.scale = F, do.center = T)
+
+# Run PCA to reduce the dimensionality of the data.
+GWPS_ridge <- RunPCA(object = GWPS_ridge, reduction.key = 'prtbpca', reduction.name = 'prtbpca')
+
+# Run mixscape.
+GWPS_ridge <- RunMixscape(
+  object = GWPS_ridge, 
+  assay = "PRTB", 
+  slot = "scale.data", 
+  labels = "gene", 
+  nt.class.name = "non-targeting", 
+  min.de.genes = 1, 
+  iter.num = 10, 
+  de.assay = "RNA", 
+  verbose = F,
+  prtb.type = "KO",
+  logfc.threshold = 0.05)
+
+# Run DE analysis and visualize results on a heatmap ordering cells by their posterior 
+# probability values.
+
+# Remove non-perturbed cells and run LDA to reduce the dimensionality of the data.
+Idents(GWPS_ridge) <- "mixscape_class.global"
+sub <- subset(GWPS_ridge, idents = c("KO", "NO"))
+
+sub <- MixscapeLDA(
+  object = sub, 
+  assay = "RNA", 
+  pc.assay = "PRTB", 
+  labels = "gene", 
+  nt.label = "non-targeting", 
+  npcs = 20, 
+  logfc.threshold = 0.05, 
+  verbose = F)
+
+# Use LDA results to run UMAP and visualize cells on 2-D. 
+# Here, we note that the number of the dimensions to be used is equal to the number of 
+# labels minus one (to account for NT cells).
+
+
+sub <- RunUMAP(
+  object = sub,
+  dims = 1:40,
+  reduction = 'lda',
+  reduction.key = 'ldaprtbumap',
+  reduction.name = 'ldaprtbumap')
+
+
+Idents(sub) <- "GDO_comb"
+
+
+p1 <- DimPlot(object = sub, 
+              reduction = "ldaprtbumap",label = T,label.box = T,pt.size = 1,label.size = 3) + NoLegend() + theme(axis.title = element_blank(),axis.ticks = element_blank(),axis.text = element_blank())
+
+plot(p1)
+
+```
+
+To ensure that our starvation paradigm was not causing poor predictions from the GWPS data that was not starved, we ran another screen, analyzed with mageck with feeding and starving the cells as described in the methods. 
+
+```{r FigS5B, dpi=300, fig.width=10, fig.height=5, dev='png'}
+Feed.gene_summary <- read.delim("/brahms/blairj/PhosphoScreen/StarveFeedValidPred/mageck/Feed.gene_summary.txt")
+Starve.gene_summary <- read.delim("/brahms/blairj/PhosphoScreen/StarveFeedValidPred/mageck/Starve.gene_summary.txt")
+
+merged_summary <- merge(Feed.gene_summary,Starve.gene_summary, by = "id", all = FALSE)
+
+# Plot only the medians with repelling labels
+p1 <- ggplot(merged_summary, aes(x = neg.lfc.x, y = neg.lfc.y)) +
+  # Add thicker zero lines
+  geom_point(color = "black", size = 3) +# Thicker vertical line# Plot median points
+  labs(
+    title = "Validation vs. Validation - Bulk Screen",
+    x = "Feed Validation Pool Log2FC",
+    y = "Starve Validation Pool Log2FC"
+  ) +
+  theme_minimal()
+
+model <- lm(merged_summary$neg.lfc.x ~ merged_summary$neg.lfc.y, data = merged_summary)
+r2_value <- summary(model)$r.squared
+R = sqrt(r2_value)
+R = 0.95
+```
+
+
 ```{r Fig5D, dpi=300, fig.width=10, fig.height=5, dev='png'}
 Idents(Validation) <- "GDO_comb"
 Validation_box <- subset(Validation,idents = c("TSC1","ITFG2","DEPDC5","FOXN1","TELO2","ATP6V1A","NO","NARS","SIRT7","MTOR","SRP72","MED12","MED19","EIF2B5","ASCC3","DAD1","EEF1G","GPN3","TAF1","TAF8","KDM1A","SMC3","EIF3D","SUPT6H","AARS","RPTOR","DHDDS"))
@@ -300,7 +417,250 @@ p8 <- ggplot(merged_pool_3, aes(x = median_pRPS6_FLEX7, y = median_pRPS6_meas)) 
   ) +
   theme_minimal()
 
-png("plots/Fig5D_ScatterPredict.png",width = 3000, height = 1500,res=300)
 plot(p8)
-dev.off()
+```
+
+The following plots aare all based on the modeling of VIM, which uses the same methods as the modeling of pRPS6
+
+``` {r FigS5C, dpi=300, fig.width=10, fig.height=5, dev='png'}
+counts_data <- GetAssayData(Glossary,layer = "data",assay = "RNA")
+counts_data  <- as.data.frame(t(as.data.frame(counts_data)))
+counts_data <- subset(counts_data[,GWPS_genes])
+counts_data <- as.matrix(counts_data)
+
+adt_data <- GetAssayData(Glossary,layer = "data",assay = "ADT")
+adt_data <- as.data.frame(t(as.data.frame(adt_data)))
+resp_VIM <- adt_data$VIM
+
+cv_ridge <- cv.glmnet(
+  counts_data, resp_VIM, 
+  alpha = 0,               # alpha = 1 for LASSO
+  family = "gaussian",     # Use "gaussian" for linear regression
+  type.measure = "class",  # Measure for classification error
+  nfolds = 10              # Number of cross-validation folds
+)
+
+# Lambda with the minimum cross-validation error
+best_lambda <- cv_ridge$lambda.min
+
+final_model_ridge <- glmnet(
+  counts_data, resp_VIM, 
+  alpha = 0, 
+  family = "gaussian", 
+  lambda = best_lambda
+)
+
+counts <- GetAssayData(Test,layer = "data",assay = "RNA")
+counts <- t(counts)
+counts <- subset(counts[,GWPS_genes])
+counts <- as.matrix(counts)
+
+predicted_probs_ridge <- predict(final_model_VIM, counts, type = "response")
+Test$VIM_ridge <- predicted_probs_ridge 
+
+adt_data <- GetAssayData(flex4,layer = "data",assay = "ADT")
+adt_data <- as.data.frame(t(as.data.frame(adt_data)))
+Test$VIM_measured <- adt_data$VIM
+
+#######
+counts <- GetAssayData(Validation,layer = "data",assay = "RNA")
+counts <- t(counts)
+counts <- subset(counts[,GWPS_genes])
+counts <- as.matrix(counts)
+
+predicted_probs_ridge <- predict(final_model_VIM, counts, type = "response")
+Validation$VIM_ridge <- predicted_probs_ridge 
+
+df <- as.data.frame(FetchData(Test, vars = c("VIM_measured","VIM_ridge")))
+# Create the scatter plot with density-based color
+p1 <- ggplot(df, aes(x = VIM_measured, y = VIM_ridge)) +
+  stat_binhex(bins = 100) +  # Use hexbin for density-based coloring
+  scale_fill_viridis_c(option = "plasma") +  # Use the 'plasma' viridis palette
+  theme_minimal()+ 
+  ylim(0,6) +
+  xlim(0,6) +
+  geom_smooth(method = "lm", color = "black", se = TRUE) +
+  theme(panel.grid = element_blank()) +
+  labs(x = "adt_pRPS6",
+       y = "pRPS6_OLS")
+
+model <- lm(df$pRPS6_measured ~ df$pRPS6_OLS, data = df)
+summary(model)
+
+plot(p1)
+
+```
+
+``` {r FigS5D, dpi=300, fig.width=10, fig.height=5, dev='png'}
+Validation_md <- Validation@meta.data
+
+median_data_valid <- Validation_md %>%
+  group_by(GDO_comb) %>%
+  summarise(VIM_measured = median(VIM_measured),VIM_ridge = median(VIM_ridge))
+
+model <- lm(median_data_valid$VIM_measured ~ median_data_valid$VIM_ridge, data = median_data_valid)
+r2_value <- summary(model)$r.squared
+summary(model)
+
+library(ggrepel)
+
+to_label <- c("TSC1","TSC2","ERCC5","RPTOR","DHDDS","GFI1B","TTI2","SEM1","VPS35","TRPM7","NPRL3")   # replace with your own
+
+p1 <- ggplot(median_data_valid, aes(x = VIM_ridge, y = VIM_measured)) +
+  geom_point(color = "black", size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  geom_text_repel(
+    data = subset(gloss_merge, gene %in% to_label),  # subset by vector
+    aes(label = gene),
+    color = "red",
+    size = 4
+  ) +
+  theme_minimal()
+
+plot(p1)
+```
+
+``` {r FigS5E, dpi=300, fig.width=10, fig.height=5, dev='png'}
+Validation_Vim <- GetAssayData(Validation,assay = "ADT")
+Validation_VIM <- as.data.frame(Validation_VIM)
+Validation_VIM <- as.data.frame(t(Validation_VIM))
+Validation_VIM_md <- Validation@meta.data     
+Validation_VIM$ident <- Validation_VIM_md$GDO_comb
+
+result_VIM <- Validation_VIM_md %>%
+  group_by(GDO_comb) %>%
+  summarise(median_VIM = median(VIM_measured))
+
+result_VIM <- result_VIM[order(result_VIM$median_VIM, decreasing = TRUE), ,drop=F]
+
+levels_VIM <- result_VIM$GDO_comb
+
+# Reorder the factor levels for the x-axis
+Validation_VIM$ident <- factor(Validation_VIM$ident, levels = c(levels_VIM))
+
+# Get default ggplot2 palette for all levels
+library(scales)
+
+n_idents <- length(unique(Validation_VIM$ident))
+
+default_cols <- hue_pal()(n_idents)
+
+# Name them after the factor levels
+names(default_cols) <- levels(Validation_VIM$ident)
+
+# Override only NO-TARGET color
+default_cols["NO-TARGET"] <- "grey"
+
+p1 <- ggplot(Validation_VIM, aes(x = ident, y = VIM, fill = ident)) +
+  geom_boxplot() +
+  scale_fill_manual(values = default_cols) +
+  theme_minimal() +
+  ylim(2, 5.5) +
+  NoLegend() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+plot(p1)
+```
+
+
+``` {r FigS5F, dpi=300, fig.width=10, fig.height=5, dev='png'}
+Idents(Validation) <- "GDO_comb"
+vim <- AggregateExpression(Validation,assays = "RNA",return.seurat = T)
+vim <- NormalizeData(vim)
+
+avg_exp <- GetAssayData(vim,assay = "RNA")
+avg_exp <- as.data.frame(avg_exp)
+
+
+p1 <- ggplot(avg_exp, aes(x = NO, y = VIM)) +
+  geom_point(color = "black", size = 3) +
+  geom_text(aes(label = ifelse(rownames(avg_exp) == "CD55", "CD55", "")),
+            hjust = -0.2, vjust = -0.5, color = "red") +
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, color = "black") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank()  # Remove gridlines
+  )
+
+plot(p1)
+```
+
+The following uses the Vimentin bulk screen data
+
+``` {r FigS5G, dpi=300, fig.width=10, fig.height=5, dev='png'}
+TvB.gene_summary <- read.delim("Top.gene_summary.txt")
+TvB.gene_summary$smaller_value <- pmin(TvB.gene_summary$neg.p.value, TvB.gene_summary$pos.p.value)
+TvB.gene_summary$smaller_rank <- pmin(TvB.gene_summary$neg.rank, TvB.gene_summary$pos.rank)
+TvB.gene_summary$smaller_rank <- (TvB.gene_summary$smaller_rank)/18939
+genes_lab <- c("VIM","KDM1A","GFI1B","LAMTOR2","LAMTOR3")
+
+p1 <- EnhancedVolcano(TvB.gene_summary,TvB.gene_summary$id,"neg.lfc","smaller_value",drawConnectors = T,arrowheads = F,selectLab = genes_lab,xlim = c(-6.5,6.5),ylim = c(0,7),FCcutoff = 1,pCutoff = 0.05,title = NULL,subtitle = NULL)
+
+plot(p1)
+```
+
+``` {r FigS5H, dpi=300, fig.width=10, fig.height=5, dev='png'}
+library(ggplot2)
+
+median_df <- GWPS_metadata_predictions %>%
+  group_by(gene) %>%
+  summarize(
+    median_VIM   = median(VIM_ridge,   na.rm = TRUE)
+  )
+
+median_gwps <- median_df[order(median_df$median_VIM, decreasing = TRUE), ,drop=F]
+high_genes_VIM <- median_gwps[1:200,]
+high_genes_VIM <- as.character(high_genes_VIM$gene)
+
+# Example data
+Top.gene_summary <- read.delim("/Top.gene_summary_vim.txt")
+genes <- Top.gene_summary$id
+ranks <- Top.gene_summary$pos.rank # Example ranks
+genes_of_interest <- high_genes_VIM  # Genes to highlight
+
+# Create a data frame
+data <- data.frame(
+  gene = genes,
+  rank = ranks,
+  highlight = ifelse(genes %in% genes_of_interest, "red", "gray")  # Highlight color
+)
+
+# Divide the data into 50 bins based on rank
+data2 <- data %>%
+  mutate(
+    bin = cut(rank, breaks = 50, labels = FALSE)  # Create bins
+  )
+
+# Filter data for only red genes
+red_genes_data <- data2 %>% dplyr::filter(highlight == "red")
+
+# Plot histogram for red genes
+p5 <- ggplot(red_genes_data, aes(x = bin)) +
+  geom_histogram(binwidth = 1, fill = "red", color = "black") +  # Histogram for red genes
+  labs(
+    title = "Histogram of Highlighted Genes by Rank Bin",
+    x = "Rank Bin",
+    y = "Count"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  # Remove all grid lines
+    axis.line = element_line(color = "black")  # Optional: add axis lines for clarity
+  )
+
+plot(p5)
+
+####
+table(red_genes_data$bin)
+
+# Observed: 37 in bin 1, 163 in other bins
+observed <- c(35, 165)
+
+# Expected: uniform distribution would be 20 in bin 1, 180 in others
+expected <- c(20, 180)
+
+# Chi-squared test
+chisq.test(x = observed, p = expected / sum(expected))
 ```
