@@ -28,15 +28,14 @@ options(future.globals.maxSize = 10 * 1024^3)
 ```
 
 
-
-Here is where we use k-means clustering from a subset of genes on a subset of perturbations to illustrate the related biological processes
+Here is where we use k-means clustering from a subset of genes on a subset of perturbations to illustrate the related biological processes. First Read in the validation dataset
 
 ``` {r Fig6A, dpi=300, fig.width=10, fig.height=5, dev='png'}
 ####### Finding the input genes
-Idents(FLEX8) <- "GDO_comb"
-MTOR_DE <- FindMarkers(FLEX8,ident.2 = "NO",ident.1 = c("MTOR","RPTOR"),only.pos = F)
-MED_DE <- FindMarkers(FLEX8,ident.2 = "NO",ident.1 = c("MED12","MED19","MED30"),only.pos = F)
-TSC1_DE <- FindMarkers(FLEX8,ident.2 = "NO",ident.1 = c("TSC1"),only.pos = F)
+Idents(Validation) <- "GDO_comb"
+MTOR_DE <- FindMarkers(Validation,ident.2 = "NO",ident.1 = c("MTOR","RPTOR"),only.pos = F)
+MED_DE <- FindMarkers(Validation,ident.2 = "NO",ident.1 = c("MED12","MED19","MED30"),only.pos = F)
+TSC1_DE <- FindMarkers(Validation,ident.2 = "NO",ident.1 = c("TSC1"),only.pos = F)
 
 MTOR_DE %>%
   dplyr::filter(p_val_adj < 0.05) %>%
@@ -56,9 +55,9 @@ TSC1_DE %>%
   ungroup() -> TSC1_DE
 TSC1_DE$gene <- rownames(TSC1_DE)
 
-ATF6_UPR <- read.table("ATF6_UPR.txt")
-IRE1a_UPR <- read.table("IRE1a_UPR.txt")
-PERK_up <- read.table("PERK_up.txt")
+ATF6_UPR <- read.table("files/ATF6_UPR.txt")
+IRE1a_UPR <- read.table("files/IRE1a_UPR.txt")
+PERK_up <- read.table("files/PERK_up.txt")
 
 #######
 Idents(Validation) <- "GDO_comb"
@@ -71,6 +70,9 @@ pseudo_sub <- subset(pseudo_ifnb,idents = c("PSMD13","NOL9","ETV4","MIOS","THG1L
 "TAF1","TIMM23B","PLCG1","WDTC1","HAUS2","NR2E1","SIRT7","CD55"),invert = T)
 DefaultAssay(pseudo_sub) <- "RNA"
 pseudo_sub <- NormalizeData(pseudo_sub)
+features2 <- rownames(
+  GetAssayData(pseudo_sub, assay = "RNA", layer = "data")
+)
 pseudo_sub <- ScaleData(pseudo_sub,assay = "RNA",features = features2)
 
 psuedo_mat <- GetAssayData(pseudo_sub,assay = "RNA",layer = "scale.data")
@@ -80,6 +82,11 @@ set.seed(1)
 k_samples <- 7  # Adjust as needed
 kmeans_samples <- kmeans(t(mat_subset), centers = k_samples, nstart = 25)
 sample_clusters <- kmeans_samples$cluster
+
+set.seed(1)
+k_genes <- 7  # Adjust as needed
+kmeans_genes <- kmeans(mat_subset, centers = k_genes, nstart = 25)
+gene_clusters <- kmeans_genes$cluster
 
 # Order genes and samples
 gene_order <- order(gene_clusters)
@@ -112,11 +119,11 @@ column_split_factor <- factor(sample_clusters_ordered,
 sample_df <- data.frame(ID = names(sample_clusters_ordered),
                         Cluster = sample_clusters_ordered)
 
-flex8_clust_sub <- subset(Validation,idents = c("PSMD13","NOL9","ETV4","MIOS","THG1L",
+Validation_clust_sub <- subset(Validation,idents = c("PSMD13","NOL9","ETV4","MIOS","THG1L",
                                             "TFRC","ATRIP","DNAJC19","VIM","MAPRE3",
                                             "FUNDC2","FOXN1","SEC61G","ADAM10","RPS6KA1",
                                             "TAF1","TIMM23B","PLCG1","WDTC1","HAUS2","NR2E1","SIRT7","CD55"),invert = T)
-FLEX_meta <- flex8_clust_sub@meta.data
+FLEX_meta <- Validation_clust_sub@meta.data
 
 median_data_FLEX <- FLEX_meta %>%
   group_by(GDO_comb) %>%
@@ -517,7 +524,7 @@ plot_grid(p1,p2,p3,ncol =3)
 plotting the qPCR data using the values from extended data
 
 ``` {r Fig6G, dpi=300, fig.width=10, fig.height=5, dev='png'}
-qPCR_results <- read_csv("/brahms/blairj/FLEX/FLEX8/qPCR_results_box.csv")
+qPCR_results <- read_csv("/brahms/blairj/FLEX/Validation/qPCR_results_box.csv")
 p1 <- ggplot(qPCR_results, aes(x = Targ_Treat, y = sXBP1_tXBP1, fill = Target)) +
   geom_boxplot() +
   scale_fill_manual(values = c(
